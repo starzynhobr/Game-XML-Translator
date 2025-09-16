@@ -1,0 +1,17 @@
+# Arquivo para ignorar arquivos e pastas no Git
+
+# Pasta do Ambiente Virtual
+/venv/
+
+# Arquivos de configuração de ambiente (onde está a API Key)
+.env
+
+# Arquivos de cache do Python
+__pycache__/
+*.pyc
+
+# Arquivos de log
+/LOGS/
+
+# Arquivos de configuração do VSCode
+.vscode/
