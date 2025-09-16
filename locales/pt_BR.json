@@ -41,5 +41,6 @@
     "glossary_terms_label": "Termos do Glossário",
     "glossary_add_button": "Adicionar Novo Termo",
     "glossary_save_button": "Salvar e Fechar",
+    "target_tag_label": "Tag Alvo, ex: <dispName> sem os' < > ':",
     "log_glossary_saved": "Glossário salvo com sucesso."
 }
