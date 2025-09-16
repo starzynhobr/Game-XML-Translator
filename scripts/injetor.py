@@ -1,7 +1,7 @@
 import xml.etree.ElementTree as ET
 import json
 
-def injetar_traducoes(arquivo_xml_original: str, mapa_traducoes: dict, arquivo_xml_final: str):
+def injetar_traducoes(arquivo_xml_original: str, mapa_traducoes: dict, arquivo_xml_final: str, target_tag="dispName"):
     """
     Lê um dicionário com traduções e as aplica a um arquivo XML,
     gerando um novo XML traduzido.
@@ -12,12 +12,13 @@ def injetar_traducoes(arquivo_xml_original: str, mapa_traducoes: dict, arquivo_x
         
         itens_modificados = 0
         for item in root.findall('.//item'):
-            disp_name = item.find('dispName')
-            if disp_name is not None and disp_name.text:
-                texto_original = disp_name.text.strip()
+            target_element = item.find(target_tag)
+            if target_element is not None and target_element.text:
+                # CORREÇÃO AQUI: Usa a variável correta 'target_element'
+                texto_original = target_element.text.strip()
                 if texto_original in mapa_traducoes:
-                    # Pega a tradução do dicionário que passamos
-                    disp_name.text = mapa_traducoes[texto_original]
+                    # CORREÇÃO AQUI: Usa a variável correta 'target_element'
+                    target_element.text = mapa_traducoes[texto_original]
                     itens_modificados += 1
 
         tree.write(arquivo_xml_final, encoding='utf-8', xml_declaration=True)

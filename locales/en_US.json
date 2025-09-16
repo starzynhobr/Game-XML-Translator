@@ -41,5 +41,6 @@
     "glossary_terms_label": "Glossary Terms",
     "glossary_add_button": "Add New Term",
     "glossary_save_button": "Save & Close",
+    "target_tag_label": "Target Tag, e.g. <dispName> without the '< >':",
     "log_glossary_saved": "Glossary saved successfully."
 }
