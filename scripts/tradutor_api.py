@@ -4,11 +4,48 @@ import time
 import os
 
 def carregar_glossario(caminho_glossario):
-    """Carrega o glossário de um arquivo JSON, se ele existir."""
     if os.path.exists(caminho_glossario):
-        with open(caminho_glossario, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {} # Retorna um dicionário vazio se o arquivo não existir
+        with open(caminho_glossario, 'r', encoding='utf-8') as f: return json.load(f)
+    return {}
+
+def traduzir_texto_unico(texto_original: str, api_key: str, model_name: str) -> str:
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+        
+        caminho_do_glossario = os.path.join(os.path.dirname(__file__), 'glossario.json')
+        glossario = carregar_glossario(caminho_do_glossario)
+        glossario_ordenado = sorted(glossario.items(), key=lambda item: len(item[0]), reverse=True)
+
+        texto_pre_traduzido = texto_original
+        termos_usados = False
+        
+        for termo_en, termo_pt in glossario_ordenado:
+            if termo_en in texto_pre_traduzido:
+                texto_pre_traduzido = texto_pre_traduzido.replace(termo_en, termo_pt)
+                termos_usados = True
+        
+        # PROMPT MELHORADO
+        if termos_usados:
+            prompt = f"""Aja como um localizador profissional de jogos. Sua tarefa é corrigir a gramática e a ordem das palavras da frase pré-traduzida abaixo para o português do Brasil, mantendo o estilo de nomes de itens de fantasia/ficção científica.
+            - Mantenha as palavras que já estão corretamente em português.
+            - O resultado final deve ser apenas o nome do item, sem aspas ou explicações.
+
+            Frase pré-traduzida: "{texto_pre_traduzido}"
+            Tradução final:"""
+        else:
+            prompt = f"""Aja como um localizador profissional de jogos. Sua tarefa é traduzir o nome de item de jogo a seguir do inglês para o português do Brasil, criando um nome que soe poderoso e natural no contexto de fantasia/ficção científica.
+            - Mantenha termos específicos como 'Mk I', 'Mk II', etc.
+            - O resultado final deve ser apenas o nome do item, sem aspas ou explicações.
+
+            Nome do item original: "{texto_original}"
+            Tradução:"""
+
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Erro na API ao traduzir '{texto_original}': {e}")
+        return texto_original
 
 def traduzir_arquivo_json(arquivo_json_entrada, arquivo_json_saida, api_key):
     # --- CONFIGURAÇÃO ---

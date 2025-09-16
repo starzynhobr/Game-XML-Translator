@@ -15,3 +15,6 @@ __pycache__/
 
 # Arquivos de configuração do VSCode
 .vscode/
+
+#arquivo json da api
+config.json
