@@ -1,15 +1,25 @@
 import customtkinter as ctk
 from tkinter import filedialog, ttk, messagebox
-import os, json, threading, time
+import os, json, threading, time, sys
 
 from dotenv import load_dotenv
 
 # Importa as funções dos nossos outros scripts
-from extrator import extrair_textos
-from tradutor_api import traduzir_texto_unico
-from injetor import injetar_traducoes
+from core.extrator import extrair_textos
+from core.tradutor_api import traduzir_texto_unico
+from core.injetor import injetar_traducoes
+from core.i18n import I18nManager
 
-from i18n import I18nManager
+def resource_path(relative_path):
+    """ Obtém o caminho absoluto para o recurso, funciona para dev e para PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temp e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se não estiver rodando como .exe, pega o caminho do projeto
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # Define a aparência padrão do aplicativo
 ctk.set_appearance_mode("Dark")
@@ -25,7 +35,7 @@ class GlossaryWindow(ctk.CTkToplevel):
         self.geometry("600x400")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         
-        self.glossary_path = os.path.join(os.path.dirname(__file__), 'glossario.json')
+        self.glossary_path = resource_path(os.path.join("scripts", "glossario.json"))
         self.glossary_data = self.load_glossary()
         self.entries = []
 
@@ -260,7 +270,7 @@ class TranslatorApp(ctk.CTk):
 
     def _carregar_idiomas_disponiveis(self):
         self.idiomas_disponiveis = {}
-        locales_path = os.path.join(os.path.dirname(__file__), '..', 'locales')
+        locales_path = resource_path("locales")
         if not os.path.exists(locales_path): return
 
         for filename in os.listdir(locales_path):
