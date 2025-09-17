@@ -18,3 +18,8 @@ __pycache__/
 
 #arquivo json da api
 config.json
+
+# Arquivos de build do PyInstaller
+/dist/
+/build/
+app_gui.spec
