@@ -1,7 +1,7 @@
 import xml.etree.ElementTree as ET
 import json
 
-def extrair_textos(arquivo_xml, arquivo_json_saida, target_tag="dispName"):
+def extrair_textos(arquivo_xml, arquivo_json_saida, parent_tag="item", target_tag="dispName"):
     textos_unicos = set()
     try:
         tree = ET.parse(arquivo_xml)

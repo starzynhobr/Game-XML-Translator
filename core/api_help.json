@@ -1,0 +1,5 @@
+{
+    "Gemini": "1. Vá para o Google AI Studio.\n2. Faça login com sua conta Google.\n3. Clique em 'Get API key' no canto superior esquerdo.\n4. Crie uma nova chave de API em um projeto novo ou existente.\n5. Copie e cole a chave aqui.",
+    "DeepL": "1. Crie uma conta no site da DeepL.\n2. Vá para a seção 'DeepL API Free' no seu perfil.\n3. Encontre sua 'Authentication Key' (Chave de Autenticação).\n4. Copie e cole a chave aqui.",
+    "Microsoft Azure": "1. Crie uma conta gratuita no portal da Microsoft Azure.\n2. No portal, procure e crie um recurso do tipo 'Tradutor' (Translator).\n3. Após a criação, vá para a seção 'Chaves e Ponto de Extremidade' (Keys and Endpoint).\n4. Você precisará de duas coisas: uma das 'CHAVES' (Key 1 ou Key 2) e a 'LOCALIZAÇÃO/REGIÃO' (Location/Region) do seu recurso (ex: 'eastus')."
+}

@@ -1,117 +1,84 @@
-import google.generativeai as genai
-import json
-import time
 import os
+import json
+import deepl
+from azure.ai.translation.text import TextTranslationClient
+from azure.core.credentials import AzureKeyCredential
+import google.generativeai as genai
+from google.cloud import translate_v2 as translate
 
-def carregar_glossario(caminho_glossario):
-    if os.path.exists(caminho_glossario):
-        with open(caminho_glossario, 'r', encoding='utf-8') as f: return json.load(f)
+# --- Carregador de Glossário (continua o mesmo) ---
+def carregar_glossario():
+    glossary_path = os.path.join(os.path.dirname(__file__), 'glossario.json')
+    if os.path.exists(glossary_path):
+        with open(glossary_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
     return {}
 
-def traduzir_texto_unico(texto_original: str, api_key: str, model_name: str) -> str:
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name)
+# --- Adaptador para o Gemini ---
+class GeminiService:
+    def translate(self, text, config):
+        genai.configure(api_key=config.get("api_key"))
+        model = genai.GenerativeModel(config.get("model", "models/gemini-1.5-flash-latest"))
         
-        caminho_do_glossario = os.path.join(os.path.dirname(__file__), 'glossario.json')
-        glossario = carregar_glossario(caminho_do_glossario)
+        # (A lógica de prompt e glossário que já tínhamos)
+        glossario = carregar_glossario()
         glossario_ordenado = sorted(glossario.items(), key=lambda item: len(item[0]), reverse=True)
-
-        texto_pre_traduzido = texto_original
+        texto_pre_traduzido = text
         termos_usados = False
-        
         for termo_en, termo_pt in glossario_ordenado:
             if termo_en in texto_pre_traduzido:
                 texto_pre_traduzido = texto_pre_traduzido.replace(termo_en, termo_pt)
                 termos_usados = True
         
-        # PROMPT MELHORADO
         if termos_usados:
-            prompt = f"""Aja como um localizador profissional de jogos. Sua tarefa é corrigir a gramática e a ordem das palavras da frase pré-traduzida abaixo para o português do Brasil, mantendo o estilo de nomes de itens de fantasia/ficção científica.
-            - Mantenha as palavras que já estão corretamente em português.
-            - O resultado final deve ser apenas o nome do item, sem aspas ou explicações.
-
-            Frase pré-traduzida: "{texto_pre_traduzido}"
-            Tradução final:"""
+            prompt = f"Corrija a gramática e a ordem das palavras para o português do Brasil na frase pré-traduzida, mantendo as palavras que já estão em português: \"{texto_pre_traduzido}\"\n\nResponda APENAS com o texto final."
         else:
-            prompt = f"""Aja como um localizador profissional de jogos. Sua tarefa é traduzir o nome de item de jogo a seguir do inglês para o português do Brasil, criando um nome que soe poderoso e natural no contexto de fantasia/ficção científica.
-            - Mantenha termos específicos como 'Mk I', 'Mk II', etc.
-            - O resultado final deve ser apenas o nome do item, sem aspas ou explicações.
-
-            Nome do item original: "{texto_original}"
-            Tradução:"""
+            prompt = f"Aja como um localizador de jogos e traduza o seguinte nome de item do inglês para o português do Brasil: \"{text}\"\n\nResponda APENAS com o texto final."
 
         response = model.generate_content(prompt)
         return response.text.strip()
-    except Exception as e:
-        print(f"Erro na API ao traduzir '{texto_original}': {e}")
-        return texto_original
 
-def traduzir_arquivo_json(arquivo_json_entrada, arquivo_json_saida, api_key):
-    # --- CONFIGURAÇÃO ---
-    genai.configure(api_key=api_key)
-    # Use o nome do modelo que funcionou para você
-    model = genai.GenerativeModel('models/gemini-1.5-flash-latest') 
-    
-    # Carrega nosso novo glossário
-    caminho_do_glossario = os.path.join(os.path.dirname(__file__), 'glossario.json')
-    glossario = carregar_glossario(caminho_do_glossario)
-    if glossario:
-        print("✅ Glossário carregado com sucesso!")
-    
-    # Ordena as chaves do glossário da mais longa para a mais curta
-    # para evitar substituições parciais (ex: "Kinetic Blade" antes de "Blade")
-    glossario_ordenado = sorted(glossario.items(), key=lambda item: len(item[0]), reverse=True)
+# --- Adaptador para o DeepL ---
+class DeepLService:
+    def translate(self, text, config):
+        translator = deepl.Translator(config.get("api_key"))
+        result = translator.translate_text(text, target_lang="PT-BR")
+        return result.text
 
-    try:
-        with open(arquivo_json_entrada, 'r', encoding='utf-8') as f:
-            mapa_traducoes = json.load(f)
-            
-        mapa_final = {}
-        for original, traducao in mapa_traducoes.items():
-            if original == traducao: # Só traduz se não foi traduzido ainda
-                print(f"Traduzindo: '{original}'...", end='')
-                
-                texto_pre_traduzido = original
-                termos_usados = False
-                
-                # --- LÓGICA DO GLOSSÁRIO ---
-                for termo_en, termo_pt in glossario_ordenado:
-                    if termo_en in texto_pre_traduzido:
-                        texto_pre_traduzido = texto_pre_traduzido.replace(termo_en, termo_pt)
-                        termos_usados = True
-                
-                if termos_usados:
-                    print(" -> [Usando Glossário]...", end='')
-                    prompt = f"""Corrija a gramática, gênero, número e a ordem das palavras para o português do Brasil na frase abaixo.
-                    - Mantenha as palavras que já estão corretamente em português.
-                    - Responda APENAS com o texto corrigido, sem nenhuma explicação.
+# --- Adaptador para o Microsoft Azure ---
+class AzureService:
+    def translate(self, text, config):
+        credential = AzureKeyCredential(config.get("api_key"))
+        text_translator = TextTranslationClient(endpoint=f"https://api.cognitive.microsofttranslator.com", credential=credential)
+        
+        response = text_translator.translate(content=[text], to_language=["pt"])
+        return response[0].translations[0].text
 
-                    Frase pré-traduzida: "{texto_pre_traduzido}"
-                    Correção:"""
-                else:
-                    # Se nenhum termo do glossário foi usado, usa o prompt original
-                    prompt = f"""Traduza o seguinte nome de item de jogo do inglês para o português do Brasil.
-                    - Mantenha a capitalização de nomes próprios e termos como 'Mk II'.
-                    - Responda APENAS com o texto traduzido, sem nenhuma explicação.
-                    
-                    Texto original: "{original}"
-                    Tradução:"""
-                
-                # --- CHAMADA DA API ---
-                response = model.generate_content(prompt)
-                traducao_nova = response.text.strip()
-                mapa_final[original] = traducao_nova
-                print(f" -> '{traducao_nova}'")
-                
-                # Use a pausa que funcionou para você
-                time.sleep(5) 
-            else:
-                mapa_final[original] = traducao
+# --- Adaptador para o Google Cloud Translate ---
+class GoogleCloudService:
+    def translate(self, text, config):
+        # Esta API requer um arquivo de credenciais JSON. A configuração é mais complexa.
+        # Por simplicidade, vamos deixar um placeholder.
+        # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'caminho/para/sua/chave.json'
+        # translate_client = translate.Client()
+        # result = translate_client.translate(text, target_language='pt')
+        # return result['translatedText']
+        print("Google Cloud Translate requer configuração avançada de credenciais.")
+        return f"[Google Cloud indisponível] {text}"
 
-        with open(arquivo_json_saida, 'w', encoding='utf-8') as f:
-            json.dump(mapa_final, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        print(f"\nErro ao traduzir {arquivo_json_entrada}: {e}")
-        return False
+# --- Dicionário de Provedores (O Coração do Adaptador) ---
+AVAILABLE_SERVICES = {
+    "Gemini": GeminiService(),
+    "DeepL": DeepLService(),
+    "Microsoft Azure": AzureService(),
+    # "Google Cloud": GoogleCloudService(), # Desabilitado por ser mais complexo
+}
+
+def translate_text(servico_escolhido, texto, config):
+    if servico_escolhido in AVAILABLE_SERVICES:
+        try:
+            service = AVAILABLE_SERVICES[servico_escolhido]
+            return service.translate(texto, config)
+        except Exception as e:
+            return f"ERRO na API ({servico_escolhido}): {e}"
+    return f"Serviço '{servico_escolhido}' não reconhecido."

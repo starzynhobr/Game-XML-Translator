@@ -42,5 +42,9 @@
     "glossary_add_button": "Add New Term",
     "glossary_save_button": "Save & Close",
     "target_tag_label": "Target Tag, e.g. <dispName> without the '< >':",
+    "extract_button": "Extract Texts",
+    "import_button": "Import Translation",
+    "api_key_prompt": "Please enter your API key for {provider}:",
+    "api_key_config_title": "API Key Configuration ({provider})",
     "log_glossary_saved": "Glossary saved successfully."
 }
