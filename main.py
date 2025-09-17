@@ -1,32 +1,25 @@
 import customtkinter as ctk
 from tkinter import filedialog, ttk, messagebox
-import os, json, threading, time, sys
+import os
+import json
+import threading
+import time
+import sys
 
-from dotenv import load_dotenv
-
-# Importa as funções dos nossos outros scripts
+# Importa os módulos e funções do nosso backend na pasta 'core'
 from core.extrator import extrair_textos
-from core.tradutor_api import traduzir_texto_unico
 from core.injetor import injetar_traducoes
+from core.tradutor_api import translate_text, AVAILABLE_SERVICES
 from core.i18n import I18nManager
-
-def resource_path(relative_path):
-    """ Obtém o caminho absoluto para o recurso, funciona para dev e para PyInstaller """
-    try:
-        # PyInstaller cria uma pasta temp e armazena o caminho em _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        # Se não estiver rodando como .exe, pega o caminho do projeto
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
 
 # Define a aparência padrão do aplicativo
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-# --- NOVO: Janela de Gerenciamento do Glossário ---
 class GlossaryWindow(ctk.CTkToplevel):
+    """
+    Janela secundária para gerenciar o glossário de tradução.
+    """
     def __init__(self, master):
         super().__init__(master)
         self.transient(master)
@@ -35,13 +28,12 @@ class GlossaryWindow(ctk.CTkToplevel):
         self.geometry("600x400")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         
-        self.glossary_path = resource_path(os.path.join("scripts", "glossario.json"))
+        self.glossary_path = os.path.join("core", "glossario.json") # Caminho simplificado
         self.glossary_data = self.load_glossary()
         self.entries = []
 
         self.scrollable_frame = ctk.CTkScrollableFrame(self, label_text=self.i18n.get("glossary_terms_label"))
         self.scrollable_frame.pack(expand=True, fill="both", padx=10, pady=10)
-
         self.rebuild_ui()
 
         button_frame = ctk.CTkFrame(self)
@@ -79,14 +71,14 @@ class GlossaryWindow(ctk.CTkToplevel):
         delete_button.grid(row=index, column=2, padx=5, pady=5)
         
         self.entries.append((key_entry, value_entry))
-        self.scrollable_frame.grid_columnconfigure(0, weight=1)
-        self.scrollable_frame.grid_columnconfigure(1, weight=1)
+        self.scrollable_frame.grid_columnconfigure((0, 1), weight=1)
 
     def add_row(self):
         self.create_row(len(self.entries), "", "")
 
     def delete_row(self, index):
-        self.glossary_data.pop(list(self.glossary_data.keys())[index])
+        key_to_delete = list(self.glossary_data.keys())[index]
+        self.glossary_data.pop(key_to_delete)
         self.rebuild_ui()
 
     def save_and_close(self):
@@ -100,159 +92,206 @@ class GlossaryWindow(ctk.CTkToplevel):
         with open(self.glossary_path, 'w', encoding='utf-8') as f:
             json.dump(new_glossary, f, indent=4, ensure_ascii=False)
         
-        self.master.log(self.i18n.get("log_glossary_saved"))
+        self.master.log(self.master.i18n.get("log_glossary_saved"))
         self.destroy()
 
     def on_close(self):
-        # Poderia adicionar um aviso de "Salvar antes de fechar?" aqui
         self.destroy()
 
 class TranslatorApp(ctk.CTk):
+    """
+    Classe principal da aplicação Game XML Translator.
+    """
     def __init__(self):
         super().__init__()
-        self.i18n = I18nManager(language="pt_BR") # Começa em português
+        
+        # --- 1. CONFIGURAÇÕES E ESTADO INICIAL ---
+        self.i18n = I18nManager(language="pt_BR")
+        self.config = self.carregar_config()
+
         self._carregar_idiomas_disponiveis()
         nome_amigavel_inicial = [name for name, code in self.idiomas_disponiveis.items() if code == self.i18n.language][0]
-        self.language_variable = ctk.StringVar(value=nome_amigavel_inicial) 
-        self.api_key = self.carregar_ou_pedir_api_key()
-        if not self.api_key: self.destroy(); return
+        self.language_variable = ctk.StringVar(value=nome_amigavel_inicial)
         
-        self.title("Game XML Translator v1.1")
-        self.geometry("1366x768")
-        self.grid_columnconfigure(1, weight=1); self.grid_rowconfigure(0, weight=1)
-        
-        self.arquivo_xml_path = ""; self.dados_traducao = {}
+        self.provedor_selecionado = ctk.StringVar(value=self.config.get("default_service", list(AVAILABLE_SERVICES.keys())[0]))
+        self.arquivo_xml_path = ""
         self.cancel_event = threading.Event()
+        
+        # --- 2. CONFIGURAÇÃO DA JANELA E LAYOUT PRINCIPAL ---
+        self.title(self.i18n.get("window_title"))
+        self.geometry("1366x768")
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self.modelos_disponiveis = {
-            "Gemini 1.5 Flash (Rápido)": ("models/gemini-1.5-flash-latest", 5),
-            "Gemini 2.5 Pro (Qualidade)": ("models/gemini-2.5-pro", 31)
-        }
-        self.modelo_selecionado = ctk.StringVar(value=list(self.modelos_disponiveis.keys())[0])
+        # --- 3. CRIAÇÃO DOS WIDGETS DA INTERFACE ---
+        self._create_main_frames()
+        self._create_left_panel_widgets()
+        self._create_center_panel_widgets()
+        self._create_right_panel_widgets()
 
-        self.left_sidebar_frame = ctk.CTkFrame(self, width=300, corner_radius=0); self.left_sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5); self.left_sidebar_frame.grid_rowconfigure(10, weight=1)
-        self.center_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent"); self.center_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5); self.center_frame.grid_columnconfigure(0, weight=1); self.center_frame.grid_rowconfigure(0, weight=1)
-        self.right_sidebar_frame = ctk.CTkFrame(self, width=300, corner_radius=0); self.right_sidebar_frame.grid(row=0, column=2, sticky="nsew"); self.right_sidebar_frame.grid_rowconfigure(8, weight=1)
-        
-        # PAINEL ESQUERDO
-        # A linha da "mola" foi REMOVIDA. Agora todos os widgets ficarão juntos.
-        
-        self.project_label = ctk.CTkLabel(self.left_sidebar_frame, text=self.i18n.get("project_panel_title"), font=ctk.CTkFont(size=20, weight="bold"))
-        self.project_label.grid(row=0, column=0, padx=20, pady=(20, 10))
-        
-        self.load_xml_button = ctk.CTkButton(self.left_sidebar_frame, text=self.i18n.get("load_xml_button"), command=self.selecionar_arquivo_xml)
-        self.load_xml_button.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
-        
-        self.glossary_button = ctk.CTkButton(self.left_sidebar_frame, text=self.i18n.get("manage_glossary_button"), command=self.open_glossary_window)
-        self.glossary_button.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
-        
-        self.lang_optionmenu = ctk.CTkOptionMenu(self.left_sidebar_frame, variable=self.language_variable, values=list(self.idiomas_disponiveis.keys()), command=self.change_language)
-        self.lang_optionmenu.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
-        
-        self.caminho_arquivo_entry = ctk.CTkEntry(self.left_sidebar_frame, placeholder_text=self.i18n.get("loaded_file_placeholder"))
-        self.caminho_arquivo_entry.grid(row=4, column=0, padx=20, pady=(10, 10), sticky="ew")
+        # --- 4. ATUALIZAÇÃO FINAL DA UI E LOG INICIAL ---
 
-        self.tag_alvo_label = ctk.CTkLabel(self.left_sidebar_frame, text=self.i18n.get("target_tag_label"))
-        self.tag_alvo_label.grid(row=5, column=0, padx=20, pady=(10, 2))
-        
-        self.tag_alvo_entry = ctk.CTkEntry(self.left_sidebar_frame)
-        self.tag_alvo_entry.insert(0, "dispName")
-        self.tag_alvo_entry.grid(row=6, column=0, padx=40, pady=(0, 20))
-
-        # --- SEÇÃO DE PROGRESSO (AGORA MAIS JUNTA) ---
-        self.progress_label = ctk.CTkLabel(self.left_sidebar_frame, text=self.i18n.get("progress_label"))
-        self.progress_label.grid(row=7, column=0, padx=20, pady=(10, 2)) # pady diminuído
-        
-        self.progressbar = ctk.CTkProgressBar(self.left_sidebar_frame, height=15)
-        self.progressbar.grid(row=8, column=0, padx=40, pady=(0, 2)) # pady diminuído
-        
-        self.stats_label = ctk.CTkLabel(self.left_sidebar_frame, text=self.i18n.get("stats_template", done=0, total=0))
-        self.stats_label.grid(row=9, column=0, padx=20, pady=(0, 20)) # pady diminuído
-        
-        # O botão de exportar agora fica na sequência, na linha 10
-        self.export_button = ctk.CTkButton(self.left_sidebar_frame, text=self.i18n.get("export_button"), command=self.exportar_xml_traduzido)
-        self.export_button.grid(row=11, column=0, padx=20, pady=10, sticky="ew")
-
-
-        # PAINEL CENTRAL
-        style = ttk.Style(); style.theme_use("default"); style.configure("Treeview", background="#2a2d2e", foreground="white", fieldbackground="#2a2d2e", borderwidth=0, rowheight=25); style.configure("Treeview.Heading", background="#565b5e", foreground="white", font=("Arial", 10, "bold")); style.map('Treeview.Heading', background=[('active', '#3484F0')])
-        self.tree = ttk.Treeview(self.center_frame, columns=("Original", "Traducao"), show="headings"); self.tree.heading("Original", text=self.i18n.get("original_text_label")); self.tree.heading("Traducao", text=self.i18n.get("translation_label")); self.tree.grid(row=0, column=0, sticky="nsew"); self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
-        self.tree.tag_configure('traduzido', background='#1E4436'); self.tree.tag_configure('traduzindo', background='#565b5e')
-        scrollbar = ctk.CTkScrollbar(self.center_frame, command=self.tree.yview); scrollbar.grid(row=0, column=1, sticky='ns'); self.tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Mini-Terminal de Log
-        self.log_textbox = ctk.CTkTextbox(self.center_frame, height=100); self.log_textbox.grid(row=1, column=0, columnspan=2, padx=0, pady=(5,0), sticky="ew"); self.log_textbox.configure(state="disabled", font=("Inter", 15))
-
-        # PAINEL DIREITO
-        self.tools_label = ctk.CTkLabel(self.right_sidebar_frame, text=self.i18n.get("tools_panel_title"), font=ctk.CTkFont(size=20, weight="bold"))
-        self.tools_label.grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 10))
-        
-        # Seleção de Modelo
-        self.model_label = ctk.CTkLabel(self.right_sidebar_frame, text=self.i18n.get("ai_model_label"), anchor="w")
-        self.model_label.grid(row=1, column=0, columnspan=2, padx=20, pady=(10, 0), sticky="w")
-        
-        self.model_optionmenu = ctk.CTkOptionMenu(self.right_sidebar_frame, variable=self.modelo_selecionado, values=list(self.modelos_disponiveis.keys()))
-        self.model_optionmenu.grid(row=2, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
-        
-        self.traduzir_tudo_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("translate_all_button"), command=self.iniciar_traducao_em_massa)
-        self.traduzir_tudo_button.grid(row=3, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
-        
-        self.original_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100)
-        self.original_textbox.grid(row=4, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
-        self.original_textbox.configure(state="disabled")
-        
-        self.traducao_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100)
-        self.traducao_textbox.grid(row=5, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="ew")
-        
-        self.sugestao_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("generate_suggestion_button"), command=self.iniciar_traducao_linha_selecionada)
-        self.sugestao_button.grid(row=6, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
-        
-        self.aprovar_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("approve_button"), fg_color="green", hover_color="darkgreen", command=self.aprovar_traducao)
-        self.aprovar_button.grid(row=9, column=0, columnspan=2, padx=20, pady=10, sticky="s")
-        
         self.update_ui_texts()
         self.log(self.i18n.get("log_welcome"))
 
+    # --- Métodos de Construção da Interface ---
+    def _create_main_frames(self):
+        self.left_sidebar_frame = ctk.CTkFrame(self, width=300, corner_radius=0)
+        self.left_sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5)
+        self.left_sidebar_frame.grid_rowconfigure(11, weight=1)
+
+        self.center_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.center_frame.grid(row=0, column=1, sticky="nsew", pady=5)
+        self.center_frame.grid_columnconfigure(0, weight=1)
+        self.center_frame.grid_rowconfigure(0, weight=1)
+        
+        self.right_sidebar_frame = ctk.CTkFrame(self, width=300, corner_radius=0)
+        self.right_sidebar_frame.grid(row=0, column=2, sticky="nsew", padx=(5, 0), pady=5)
+        self.right_sidebar_frame.grid_rowconfigure(8, weight=1)
+
+    def _create_left_panel_widgets(self):
+        self.project_label = ctk.CTkLabel(self.left_sidebar_frame, font=ctk.CTkFont(size=20, weight="bold"))
+        self.project_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        self.load_xml_button = ctk.CTkButton(self.left_sidebar_frame, command=self.selecionar_arquivo_xml)
+        self.load_xml_button.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
+        
+        self.glossary_button = ctk.CTkButton(self.left_sidebar_frame, command=self.open_glossary_window)
+        self.glossary_button.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
+
+        self.json_io_frame = ctk.CTkFrame(self.left_sidebar_frame); self.json_io_frame.grid(row=3, column=0, padx=20, pady=5, sticky="ew"); self.json_io_frame.grid_columnconfigure((0, 1), weight=1)
+        self.export_json_button = ctk.CTkButton(self.json_io_frame, command=self.exportar_json_para_traducao); self.export_json_button.grid(row=0, column=0, padx=(0, 5), pady=5, sticky="ew")
+        self.import_json_button = ctk.CTkButton(self.json_io_frame, command=self.importar_json_traduzido); self.import_json_button.grid(row=0, column=1, padx=(5, 0), pady=5, sticky="ew")
+        
+        self.lang_optionmenu = ctk.CTkOptionMenu(self.left_sidebar_frame, variable=self.language_variable, values=list(self.idiomas_disponiveis.keys()), command=self.change_language)
+        self.lang_optionmenu.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
+        
+        self.caminho_arquivo_entry = ctk.CTkEntry(self.left_sidebar_frame); self.caminho_arquivo_entry.grid(row=5, column=0, padx=20, pady=(10, 10), sticky="ew")
+        
+        self.tag_alvo_label = ctk.CTkLabel(self.left_sidebar_frame); self.tag_alvo_label.grid(row=6, column=0, padx=20, pady=(10, 2))
+        self.tag_alvo_entry = ctk.CTkEntry(self.left_sidebar_frame); self.tag_alvo_entry.insert(0, "dispName"); self.tag_alvo_entry.grid(row=7, column=0, padx=40, pady=(0, 10))
+        
+        self.parent_tag_label = ctk.CTkLabel(self.left_sidebar_frame, text="Tag Pai (ex: item):"); self.parent_tag_label.grid(row=8, column=0, padx=20, pady=(10, 2))
+        self.parent_tag_entry = ctk.CTkEntry(self.left_sidebar_frame); self.parent_tag_entry.insert(0, "item"); self.parent_tag_entry.grid(row=9, column=0, padx=40, pady=(0, 20))
+
+        self.progress_label = ctk.CTkLabel(self.left_sidebar_frame); self.progress_label.grid(row=10, column=0, padx=20, pady=(10, 2))
+        self.progressbar = ctk.CTkProgressBar(self.left_sidebar_frame, height=15); self.progressbar.grid(row=11, column=0, padx=40, pady=(0, 2)); self.progressbar.set(0)
+        self.stats_label = ctk.CTkLabel(self.left_sidebar_frame); self.stats_label.grid(row=12, column=0, padx=20, pady=(0, 20))
+        
+        self.export_button = ctk.CTkButton(self.left_sidebar_frame, command=self.exportar_xml_traduzido)
+        self.export_button.grid(row=13, column=0, padx=20, pady=20, sticky="ew")
+
+    def _create_center_panel_widgets(self):
+        style = ttk.Style(); style.theme_use("default"); style.configure("Treeview", background="#2a2d2e", foreground="white", fieldbackground="#2a2d2e", borderwidth=0, rowheight=25); style.configure("Treeview.Heading", background="#565b5e", foreground="white", font=("Arial", 10, "bold")); style.map('Treeview.Heading', background=[('active', '#3484F0')])
+        
+        self.tree = ttk.Treeview(self.center_frame, columns=("Original", "Traducao"), show="headings")
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        self.tree.tag_configure('traduzido', background='#1E4436')
+        self.tree.tag_configure('traduzindo', background='#565b5e')
+        
+        scrollbar = ctk.CTkScrollbar(self.center_frame, command=self.tree.yview); scrollbar.grid(row=0, column=1, sticky='ns'); self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.log_textbox = ctk.CTkTextbox(self.center_frame, height=100); self.log_textbox.grid(row=1, column=0, columnspan=2, padx=0, pady=(5,0), sticky="ew"); self.log_textbox.configure(font=("Courier New", 10))
+
+    def _create_right_panel_widgets(self):
+        self.tools_label = ctk.CTkLabel(self.right_sidebar_frame, font=ctk.CTkFont(size=20, weight="bold")); self.tools_label.grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 10))
+        
+        self.provider_label = ctk.CTkLabel(self.right_sidebar_frame, text="Provedor de Tradução:"); self.provider_label.grid(row=1, column=0, padx=(20, 5), pady=(10,0), sticky="w")
+        self.help_api_button = ctk.CTkButton(self.right_sidebar_frame, text="?", width=20, command=self.mostrar_ajuda_api); self.help_api_button.grid(row=1, column=1, padx=(0, 20), pady=(10,0), sticky="w")
+        self.provider_optionmenu = ctk.CTkOptionMenu(self.right_sidebar_frame, variable=self.provedor_selecionado, values=list(AVAILABLE_SERVICES.keys()), command=self.verificar_chave_api); self.provider_optionmenu.grid(row=2, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="ew")
+        
+        self.traduzir_tudo_button = ctk.CTkButton(self.right_sidebar_frame, command=self.iniciar_traducao_em_massa); self.traduzir_tudo_button.grid(row=3, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        
+        self.original_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100); self.original_textbox.grid(row=4, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
+        self.traducao_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100); self.traducao_textbox.grid(row=5, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="ew")
+        
+        self.sugestao_button = ctk.CTkButton(self.right_sidebar_frame, command=self.iniciar_traducao_linha_selecionada); self.sugestao_button.grid(row=6, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        self.aprovar_button = ctk.CTkButton(self.right_sidebar_frame, fg_color="green", hover_color="darkgreen", command=self.aprovar_traducao); self.aprovar_button.grid(row=9, column=0, columnspan=2, padx=20, pady=10, sticky="s")
+
+    # --- Funções de Lógica e Comandos ---
     def log(self, message):
         self.log_textbox.configure(state="normal")
         self.log_textbox.insert("end", f"[{time.strftime('%H:%M:%S')}] {message}\n")
         self.log_textbox.configure(state="disabled")
         self.log_textbox.see("end")
 
-    def carregar_ou_pedir_api_key(self):
-        config_path = "config.json";
+    def carregar_config(self):
         try:
-            with open(config_path, 'r') as f: config = json.load(f); return config.get("api_key")
+            with open("config.json", 'r') as f: return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            dialog = ctk.CTkInputDialog(text=self.i18n.get("api_gemini_key"), title=self.i18n.get("api_key_config")); key = dialog.get_input()
+            return {"services": {}}
+
+    def salvar_config(self):
+        with open("config.json", 'w') as f: json.dump(self.config, f, indent=4)
+
+    def verificar_chave_api_inicial(self):
+        provider = self.provedor_selecionado.get()
+        if provider not in self.config["services"] or not self.config["services"][provider].get("api_key"):
+            self.after(100, lambda p=provider: self.verificar_chave_api(p))
+
+    def verificar_chave_api(self, provedor_selecionado):
+        if provedor_selecionado not in self.config["services"] or not self.config["services"][provedor_selecionado].get("api_key"):
+            prompt_text = self.i18n.get("api_key_prompt", provider=provedor_selecionado)
+            prompt_title = self.i18n.get("api_key_config_title", provider=provedor_selecionado)
+            dialog = ctk.CTkInputDialog(text=prompt_text, title=prompt_title)
+
+            key = dialog.get_input()
             if key:
-                with open(config_path, 'w') as f: json.dump({"api_key": key}, f)
-                return key
-        return None
+                if provedor_selecionado not in self.config["services"]: self.config["services"][provedor_selecionado] = {}
+                self.config["services"][provedor_selecionado]["api_key"] = key
+                self.salvar_config(); self.log(f"Chave da API para {provedor_selecionado} foi salva.")
+                return True
+            else:
+                self.log(f"Configuração de chave para {provedor_selecionado} cancelada.")
+                return False
+        return True
+
+    def mostrar_ajuda_api(self):
+            provedor = self.provedor_selecionado.get()
+            try:
+                # Garante que o caminho para o arquivo de ajuda está correto
+                caminho_ajuda = os.path.join("core", "api_help.json")
+                with open(caminho_ajuda, 'r', encoding='utf-8') as f:
+                    ajuda_textos = json.load(f)
+                
+                texto_ajuda = ajuda_textos.get(provedor, "Nenhuma instrução encontrada para este provedor.")
+                
+                # Cria uma nova janela (Toplevel) para mostrar a ajuda
+                help_win = ctk.CTkToplevel(self)
+                help_win.title(f"Como Obter a Chave - {provedor}")
+                help_win.geometry("500x350")
+                
+                textbox = ctk.CTkTextbox(help_win, wrap="word")
+                textbox.pack(expand=True, fill="both", padx=10, pady=10)
+                textbox.insert("1.0", texto_ajuda)
+                textbox.configure(state="disabled")
+                
+                help_win.transient(self) # Mantém a janela de ajuda na frente
+                help_win.grab_set()      # Foca na janela de ajuda
+
+            except Exception as e:
+                self.log(f"Erro ao carregar arquivo de ajuda: {e}")
 
     def selecionar_arquivo_xml(self):
         filepath = filedialog.askopenfilename(title=self.i18n.get("select_xml_file"), filetypes=(("Arquivos XML", "*.xml"), ("Todos os arquivos", "*.*")))
         if not filepath: return
         
-        # Pega a tag alvo da interface
         tag_alvo = self.tag_alvo_entry.get().strip()
-        if not tag_alvo:
-            messagebox.showwarning("Atenção", "Por favor, especifique uma Tag Alvo para tradução.")
+        parent_tag = self.parent_tag_entry.get().strip()
+        if not tag_alvo or not parent_tag:
+            messagebox.showwarning("Atenção", "Por favor, especifique a Tag Pai e a Tag Alvo.")
             return
 
-        self.arquivo_xml_path = filepath
-        filename = os.path.basename(filepath)
+        self.arquivo_xml_path = filename = os.path.basename(filepath)
         self.caminho_arquivo_entry.configure(state="normal"); self.caminho_arquivo_entry.delete(0, "end"); self.caminho_arquivo_entry.insert(0, filename); self.caminho_arquivo_entry.configure(state="disabled")
         
         temp_json_path = "temp_extracao.json"
-        # Passa a tag_alvo para a função de extração
-        if extrair_textos(self.arquivo_xml_path, temp_json_path, target_tag=tag_alvo):
-            with open(temp_json_path, 'r', encoding='utf-8') as f:
-                self.dados_traducao = json.load(f)
+        if extrair_textos(filepath, temp_json_path, parent_tag=parent_tag, target_tag=tag_alvo):
+            with open(temp_json_path, 'r', encoding='utf-8') as f: self.dados_traducao = json.load(f)
             os.remove(temp_json_path)
             
             for i in self.tree.get_children(): self.tree.delete(i)
-            
             for i, (original, traducao) in enumerate(self.dados_traducao.items()):
                 self.tree.insert("", "end", iid=i, values=(original, traducao), tags=('nao_traduzido',))
             
@@ -260,6 +299,76 @@ class TranslatorApp(ctk.CTk):
             self.log(self.i18n.get("log_extract_success", count=len(self.dados_traducao)))
         else:
             self.log(self.i18n.get("log_extract_fail"))
+
+    def importar_json_traduzido(self):
+            if not self.tree.get_children(): # Verifica se há dados na tabela
+                messagebox.showwarning("Atenção", "Carregue um arquivo XML primeiro para popular a tabela.")
+                return
+                
+            filepath = filedialog.askopenfilename(
+                title="Selecione o arquivo JSON com as traduções",
+                filetypes=(("Arquivos JSON", "*.json"), ("Todos os arquivos", "*.*"))
+            )
+            if not filepath:
+                self.log("Importação de JSON cancelada.")
+                return
+
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    mapa_traducoes = json.load(f)
+            except Exception as e:
+                messagebox.showerror("Erro de Leitura", f"Não foi possível ler o arquivo JSON.\nVerifique se o formato está correto.\n\nDetalhes: {e}")
+                return
+
+            self.log(f"Importando {len(mapa_traducoes)} traduções do arquivo '{os.path.basename(filepath)}'...")
+            
+            itens_atualizados = 0
+            for item_id in self.tree.get_children():
+                original_text, _ = self.tree.item(item_id, 'values')
+                
+                # Procura a tradução no mapa importado
+                if original_text in mapa_traducoes:
+                    nova_traducao = mapa_traducoes[original_text]
+                    # Atualiza a tabela na interface
+                    self.tree.item(item_id, values=(original_text, nova_traducao))
+                    # "Aprova" o item para atualizar o progresso
+                    self.aprovar_traducao(id_item=item_id, salvar_texto=False)
+                    itens_atualizados += 1
+            
+            self.log(f"{itens_atualizados} itens foram atualizados na tabela.")
+            messagebox.showinfo("Sucesso", f"{itens_atualizados} traduções foram importadas com sucesso!")
+
+    def exportar_json_para_traducao(self):
+        if not self.arquivo_xml_path:
+            messagebox.showwarning(self.i18n.get("warn_no_xml_title"), self.i18n.get("warn_no_xml_message"))
+            return
+
+        caminho_saida = filedialog.asksaveasfilename(
+            title="Salvar JSON para Tradução",
+            defaultextension=".json",
+            filetypes=(("Arquivos JSON", "*.json"), ("Todos os arquivos", "*.*")),
+            initialfile="textos_para_traduzir.json"
+        )
+
+        if not caminho_saida:
+            self.log("Extração de JSON cancelada.")
+            return
+
+        tag_alvo = self.tag_alvo_entry.get().strip()
+        parent_tag = self.parent_tag_entry.get().strip()
+
+        sucesso = extrair_textos(
+            arquivo_xml=self.arquivo_xml_path,
+            arquivo_json_saida=caminho_saida,
+            parent_tag=parent_tag,
+            target_tag=tag_alvo
+        )
+
+        if sucesso:
+            messagebox.showinfo("Sucesso", f"Arquivo JSON extraído com sucesso para:\n{caminho_saida}")
+            self.log("Arquivo JSON com textos originais foi extraído.")
+        else:
+            messagebox.showerror("Erro", "Ocorreu um erro ao extrair o arquivo JSON.")
 
     def change_language(self, language_choice: str):
         lang_code = self.idiomas_disponiveis.get(language_choice)
@@ -270,7 +379,7 @@ class TranslatorApp(ctk.CTk):
 
     def _carregar_idiomas_disponiveis(self):
         self.idiomas_disponiveis = {}
-        locales_path = resource_path("locales")
+        locales_path = os.path.join("locales")
         if not os.path.exists(locales_path): return
 
         for filename in os.listdir(locales_path):
@@ -279,36 +388,31 @@ class TranslatorApp(ctk.CTk):
                 try:
                     with open(os.path.join(locales_path, filename), 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        lang_name = data.get("_language_name", lang_code) # Usa o nome amigável ou o código do arquivo
+                        lang_name = data.get("_language_name", lang_code)
                         self.idiomas_disponiveis[lang_name] = lang_code
                 except Exception as e:
                     print(f"Erro ao carregar o idioma {filename}: {e}")
 
     def update_ui_texts(self):
-        """
-        Esta função é o "coração" da troca de idioma. Ela passa por todos
-        os widgets e atualiza seus textos com base no novo idioma carregado.
-        """
         self.title(self.i18n.get("window_title"))
         self.project_label.configure(text=self.i18n.get("project_panel_title"))
         self.load_xml_button.configure(text=self.i18n.get("load_xml_button"))
         self.glossary_button.configure(text=self.i18n.get("manage_glossary_button"))
+        self.export_json_button.configure(text=self.i18n.get("extract_button"))
+        self.import_json_button.configure(text=self.i18n.get("import_button"))
         self.progress_label.configure(text=self.i18n.get("progress_label"))
         self.export_button.configure(text=self.i18n.get("export_button"))
         self.tools_label.configure(text=self.i18n.get("tools_panel_title"))
-        self.model_label.configure(text=self.i18n.get("ai_model_label"))
+        self.parent_tag_label.configure(text=self.i18n.get("parent_tag_label"))
+        self.tag_alvo_label.configure(text=self.i18n.get("target_tag_label"))
+        self.provider_label.configure(text=self.i18n.get("provider_label"))
         self.traduzir_tudo_button.configure(text=self.i18n.get("translate_all_button"))
         self.sugestao_button.configure(text=self.i18n.get("generate_suggestion_button"))
         self.tree.heading("Original", text=self.i18n.get("original_text_label"))
         self.tree.heading("Traducao", text=self.i18n.get("translation_label"))
-        self.tree.heading("Original", text=self.i18n.get("original_text_label"))
-        self.tree.heading("Traducao", text=self.i18n.get("translation_label"))
         self.aprovar_button.configure(text=self.i18n.get("approve_button"))
-        self.caminho_arquivo_entry.configure(state="normal")
-        self.caminho_arquivo_entry.configure(placeholder_text=self.i18n.get("loaded_file_placeholder"))
-        self.caminho_arquivo_entry.configure(state="disabled")
-        self.tag_alvo_label.configure(text=self.i18n.get("target_tag_label"))
-        self.atualizar_estatisticas() # Para atualizar o texto do stats_label
+        self.caminho_arquivo_entry.configure(state="normal"); self.caminho_arquivo_entry.configure(placeholder_text=self.i18n.get("loaded_file_placeholder")); self.caminho_arquivo_entry.configure(state="disabled")
+        self.atualizar_estatisticas()
 
     def on_tree_select(self, event):
         if not self.tree.selection(): return
@@ -318,61 +422,61 @@ class TranslatorApp(ctk.CTk):
         self.traducao_textbox.delete("1.0", "end"); self.traducao_textbox.insert("1.0", translation_text)
 
     def iniciar_traducao_linha_selecionada(self):
+        provedor = self.provedor_selecionado.get()
+        if not self.verificar_chave_api(provedor):
+            self.log(f"Tradução cancelada. Chave de API para {provedor} não fornecida.")
+            return
         if not self.tree.selection(): self.log(self.i18n.get("log_no_selection")); return
         threading.Thread(target=self._worker_traduzir_linha, daemon=True).start()
 
     def _worker_traduzir_linha(self):
+        provedor = self.provedor_selecionado.get()
+        if not self.verificar_chave_api(provedor): return
+        config_do_provedor = self.config["services"][provedor]
         selected_item_id = self.tree.selection()[0]
         original_text = self.tree.item(selected_item_id, 'values')[0]
-        
         self.after(0, lambda: self.tree.item(selected_item_id, tags=('traduzindo',)))
-        
-        modelo_escolhido, _ = self.modelos_disponiveis[self.modelo_selecionado.get()]
-        traducao_sugerida = traduzir_texto_unico(original_text, self.api_key, modelo_escolhido)
-        
+        traducao_sugerida = translate_text(provedor, original_text, config_do_provedor)
         self.after(0, lambda: self._update_ui_com_traducao(selected_item_id, traducao_sugerida))
         self.after(0, lambda: self.aprovar_traducao(id_item=selected_item_id, salvar_texto=False))
 
+    def iniciar_traducao_em_massa(self):
+        provedor = self.provedor_selecionado.get()
+        if not self.verificar_chave_api(provedor):
+            self.log(f"Tradução em massa cancelada. Chave de API para {provedor} não fornecida.")
+            return
+        if self.traduzir_tudo_button.cget("text") == self.i18n.get("cancel_button"):
+            self.cancel_event.set(); self.log(self.i18n.get("log_mass_trans_cancel_req")); return
+        if not self.verificar_chave_api(self.provedor_selecionado.get()): return
+        self.traduzir_tudo_button.configure(text=self.i18n.get("cancel_button"), fg_color="red", hover_color="darkred")
+        self.cancel_event.clear()
+        threading.Thread(target=self._worker_traducao_em_massa, daemon=True).start()
+
     def _worker_traducao_em_massa(self):
+        provedor = self.provedor_selecionado.get()
+        config_do_provedor = self.config["services"][provedor]
         ids_para_traduzir = [item_id for item_id in self.tree.get_children() if 'nao_traduzido' in self.tree.item(item_id, 'tags')]
         total_a_traduzir = len(ids_para_traduzir)
-        self.log(self.i18n.get("log_mass_trans_found"))
+        self.log(self.i18n.get("log_mass_trans_found", count=total_a_traduzir))
 
-        modelo_escolhido, pausa = self.modelos_disponiveis[self.modelo_selecionado.get()]
+        _, pausa = self.modelos_disponiveis.get(provedor, (None, 5))
         
         for i, item_id in enumerate(ids_para_traduzir):
-            if self.cancel_event.is_set():
-                self.log(self.i18n.get("log_mass_trans_cancelled"))
-                break
-
+            if self.cancel_event.is_set(): self.log(self.i18n.get("log_mass_trans_cancelled")); break
             self.after(0, lambda id=item_id: self.tree.see(id))
             self.after(0, lambda id=item_id: self.tree.item(id, tags=('traduzindo',)))
             original_text = self.tree.item(item_id, 'values')[0]
-            self.log(f"({i+1}/{total_a_traduzir}) Traduzindo: '{original_text}'...")
+            self.log(self.i18n.get("log_mass_trans_item", current=i+1, total=total_a_traduzir, text=original_text))
 
-            traducao_sugerida = traduzir_texto_unico(original_text, self.api_key, modelo_escolhido)
-            
+            traducao_sugerida = translate_text(provedor, original_text, config_do_provedor)
             if self.cancel_event.is_set(): continue
 
             self.after(0, lambda id=item_id, trad=traducao_sugerida: self._update_ui_com_traducao(id, trad))
             self.after(0, lambda id=item_id: self.aprovar_traducao(id_item=id, salvar_texto=False))
             time.sleep(pausa)
-
-        if not self.cancel_event.is_set():
-            self.log(self.i18n.get("log_mass_trans_done"))
-
-        # Reseta o botão para o estado original
+        
+        if not self.cancel_event.is_set(): self.log(self.i18n.get("log_mass_trans_done"))
         self.after(0, lambda: self.traduzir_tudo_button.configure(text=self.i18n.get("translate_all_button"), fg_color=ctk.ThemeManager.theme["CTkButton"]["fg_color"], hover_color=ctk.ThemeManager.theme["CTkButton"]["hover_color"]))
-
-    def iniciar_traducao_em_massa(self):
-        if self.traduzir_tudo_button.cget("text") == self.i18n.get("cancel_button"):
-            self.cancel_event.set()
-            self.log(self.i18n.get("log_mass_trans_cancel_req"))
-            return
-
-        self.traduzir_tudo_button.configure(text=self.i18n.get("cancel_button"), fg_color="red", hover_color="darkred")
-        self.cancel_event.clear()
-        threading.Thread(target=self._worker_traducao_em_massa, daemon=True).start()
 
     def aprovar_traducao(self, id_item=None, salvar_texto=True):
         selected_item_id = id_item if id_item else (self.tree.selection()[0] if self.tree.selection() else None)
@@ -385,18 +489,11 @@ class TranslatorApp(ctk.CTk):
         if salvar_texto:
             nova_traducao = self.traducao_textbox.get("1.0", "end-1c").strip()
         
-        # Atualiza a tabela com o novo valor e a nova tag
-        self.tree.item(selected_item_id, values=(original_text, nova_traducao), tags=('traduzido',))
-        
-        # Só atualiza as estatísticas se o item era 'nao_traduzido' antes.
-        # Isso evita contar o mesmo item duas vezes.
         if 'nao_traduzido' in tags_atuais:
+            self.tree.item(selected_item_id, values=(original_text, nova_traducao), tags=('traduzido',))
             self.atualizar_estatisticas()
-        
-    def _update_textbox_com_feedback(self, item_id, texto):
-        if self.tree.selection() and self.tree.selection()[0] == item_id:
-            self.traducao_textbox.delete("1.0", "end")
-            self.traducao_textbox.insert("1.0", texto)
+        elif salvar_texto:
+             self.tree.item(selected_item_id, values=(original_text, nova_traducao))
 
     def _update_ui_com_traducao(self, item_id, traducao_sugerida):
         original_text = self.tree.item(item_id, 'values')[0]
@@ -405,55 +502,33 @@ class TranslatorApp(ctk.CTk):
             self.traducao_textbox.delete("1.0", "end"); self.traducao_textbox.insert("1.0", traducao_sugerida)
     
     def atualizar_estatisticas(self):
-        # Lógica 100% baseada na contagem de tags, muito mais confiável.
         total_itens = len(self.tree.get_children())
         itens_traduzidos = len(self.tree.tag_has('traduzido'))
-        
         self.stats_label.configure(text=self.i18n.get("stats_template", done=itens_traduzidos, total=total_itens))
         progresso = itens_traduzidos / total_itens if total_itens > 0 else 0
         self.progressbar.set(progresso)
 
     def exportar_xml_traduzido(self):
-        if not self.arquivo_xml_path:
-            messagebox.showwarning(self.i18n.get("warn_no_xml_title"), self.i18n.get("warn_no_xml_message"))
-            return
-
-        # Pega a tag alvo da interface
+        if not self.arquivo_xml_path: messagebox.showwarning(self.i18n.get("warn_no_xml_title"), self.i18n.get("warn_no_xml_message")); return
+        
         tag_alvo = self.tag_alvo_entry.get().strip()
-        if not tag_alvo:
-            messagebox.showwarning("Atenção", "Por favor, especifique uma Tag Alvo para tradução.")
-            return
+        parent_tag = self.parent_tag_entry.get().strip()
+        if not tag_alvo or not parent_tag: messagebox.showwarning("Atenção", "Por favor, especifique a Tag Pai e a Tag Alvo."); return
 
-        mapa_final_traducoes = {}
-        for child_id in self.tree.get_children():
-            original, traducao = self.tree.item(child_id, 'values')
-            mapa_final_traducoes[original] = traducao
+        mapa_final_traducoes = {self.tree.item(child_id, 'values')[0]: self.tree.item(child_id, 'values')[1] for child_id in self.tree.get_children()}
         
         caminho_saida = filedialog.asksaveasfilename(
-            title=self.i18n.get("save_as"),
-            defaultextension=".xml",
-            filetypes=(("Arquivos XML", "*.xml"), ("Todos os arquivos", "*.*")),
+            title=self.i18n.get("save_as"), defaultextension=".xml", filetypes=(("Arquivos XML", "*.xml"), ("Todos os arquivos", "*.*")),
             initialfile=f"{os.path.basename(self.arquivo_xml_path).replace('.xml', '')}_traduzido.xml"
         )
-
-        if not caminho_saida:
-            self.log(self.i18n.get("export_cancelled"))
-            return
-            
-        # Passa a tag_alvo para a função de injeção
+        if not caminho_saida: self.log(self.i18n.get("export_cancelled")); return
+        
         sucesso = injetar_traducoes(
-            arquivo_xml_original=self.arquivo_xml_path,
-            mapa_traducoes=mapa_final_traducoes,
-            arquivo_xml_final=caminho_saida,
-            target_tag=tag_alvo
+            arquivo_xml_original=self.arquivo_xml_path, mapa_traducoes=mapa_final_traducoes,
+            arquivo_xml_final=caminho_saida, parent_tag=parent_tag, target_tag=tag_alvo
         )
-
-        if sucesso:
-            messagebox.showinfo("Sucesso", f"Arquivo XML traduzido salvo com sucesso em:\n{caminho_saida}")
-            self.log("Exportação bem-sucedida.")
-        else:
-            messagebox.showerror("Erro", self.i18n.get("export_fail"))
-            self.log("Falha na exportação.")
+        if sucesso: messagebox.showinfo("Sucesso", f"Arquivo XML traduzido salvo com sucesso em:\n{caminho_saida}"); self.log("Exportação bem-sucedida.")
+        else: messagebox.showerror("Erro", self.i18n.get("export_fail")); self.log("Falha na exportação.")
 
     def open_glossary_window(self):
         if hasattr(self, 'glossary_win') and self.glossary_win.winfo_exists():

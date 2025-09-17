@@ -42,5 +42,9 @@
     "glossary_add_button": "Adicionar Novo Termo",
     "glossary_save_button": "Salvar e Fechar",
     "target_tag_label": "Tag Alvo, ex: <dispName> sem os' < > ':",
+    "extract_button": "Extrair Textos",
+    "import_button": "Importar Tradução",
+    "api_key_prompt": "Por favor, insira sua chave da API para {provider}:",
+    "api_key_config_title": "Configuração de Chave API ({provider})",
     "log_glossary_saved": "Glossário salvo com sucesso."
 }
