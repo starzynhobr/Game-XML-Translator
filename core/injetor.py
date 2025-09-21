@@ -1,29 +1,43 @@
-import xml.etree.ElementTree as ET
+# Em core/injetor.py - SUBSTITUA O CONTEÚDO TODO
+
+from lxml import etree as ET # 1. MUDANÇA IMPORTANTE: Usando a biblioteca lxml
 import json
 
-def injetar_traducoes(arquivo_xml_original: str, mapa_traducoes: dict, arquivo_xml_final: str, target_tag="dispName"):
+def injetar_traducoes(arquivo_xml_original: str, mapa_traducoes, arquivo_xml_final: str):
     """
-    Lê um dicionário com traduções e as aplica a um arquivo XML,
-    gerando um novo XML traduzido.
+    Recebe um mapa (dicionário ou caminho de arquivo JSON) de XPath -> Tradução
+    e aplica as mudanças no XML usando o poder do lxml.
+    Retorna True em caso de sucesso, False em caso de falha.
     """
     try:
-        tree = ET.parse(arquivo_xml_original)
+        # 2. LÓGICA MELHORADA: Se recebermos um caminho de arquivo, lemos o JSON.
+        if isinstance(mapa_traducoes, str):
+            with open(mapa_traducoes, 'r', encoding='utf-8') as f:
+                mapa_xpath_traducao = json.load(f)
+        else:
+            mapa_xpath_traducao = mapa_traducoes
+
+        # Usamos o parser do lxml, que é mais robusto
+        parser = ET.XMLParser(remove_blank_text=True)
+        tree = ET.parse(arquivo_xml_original, parser)
         root = tree.getroot()
         
         itens_modificados = 0
-        for item in root.findall('.//item'):
-            target_element = item.find(target_tag)
-            if target_element is not None and target_element.text:
-                # CORREÇÃO AQUI: Usa a variável correta 'target_element'
-                texto_original = target_element.text.strip()
-                if texto_original in mapa_traducoes:
-                    # CORREÇÃO AQUI: Usa a variável correta 'target_element'
-                    target_element.text = mapa_traducoes[texto_original]
-                    itens_modificados += 1
-
-        tree.write(arquivo_xml_final, encoding='utf-8', xml_declaration=True)
-        print(f"Injeção concluída! {itens_modificados} textos foram substituídos.")
+        
+        for xpath, traducao in mapa_xpath_traducao.items():
+            # 3. MUDANÇA CRÍTICA: root.xpath() do lxml entende os endereços complexos
+            elementos = root.xpath(xpath)
+            if elementos:
+                elementos[0].text = traducao
+                itens_modificados += 1
+        
+        print(f"Injeção concluída. Itens modificados: {itens_modificados}")
+        tree.write(arquivo_xml_final, encoding='utf-8', xml_declaration=True, pretty_print=True)
         return True
+        
+    except FileNotFoundError:
+        print(f"ERRO no injetor: Arquivo não encontrado - {arquivo_xml_original} ou {mapa_traducoes}")
+        return False
     except Exception as e:
-        print(f"Erro ao injetar traduções em {arquivo_xml_original}: {e}")
+        print(f"ERRO INESPERADO durante a injeção: {e}")
         return False

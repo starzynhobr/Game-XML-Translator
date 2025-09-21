@@ -1,12 +1,17 @@
 import os
 import json
+import requests # Novo import
 import deepl
 from azure.ai.translation.text import TextTranslationClient
 from azure.core.credentials import AzureKeyCredential
 import google.generativeai as genai
-from google.cloud import translate_v2 as translate
 
-# --- Carregador de Glossário (continua o mesmo) ---
+# --- Classe Base (Boa Prática) ---
+class TranslationService:
+    def translate(self, text, config):
+        raise NotImplementedError
+
+# --- Carregador de Glossário ---
 def carregar_glossario():
     glossary_path = os.path.join(os.path.dirname(__file__), 'glossario.json')
     if os.path.exists(glossary_path):
@@ -39,39 +44,60 @@ class GeminiService:
         return response.text.strip()
 
 # --- Adaptador para o DeepL ---
-class DeepLService:
+class DeepLService(TranslationService):
     def translate(self, text, config):
+        # ... (código do DeepLService continua o mesmo)
         translator = deepl.Translator(config.get("api_key"))
         result = translator.translate_text(text, target_lang="PT-BR")
         return result.text
 
 # --- Adaptador para o Microsoft Azure ---
-class AzureService:
+class AzureService(TranslationService):
     def translate(self, text, config):
+        # ... (código do AzureService continua o mesmo)
         credential = AzureKeyCredential(config.get("api_key"))
-        text_translator = TextTranslationClient(endpoint=f"https://api.cognitive.microsofttranslator.com", credential=credential)
-        
+        endpoint = f"https://api.cognitive.microsofttranslator.com"
+        text_translator = TextTranslationClient(endpoint=endpoint, credential=credential)
         response = text_translator.translate(content=[text], to_language=["pt"])
         return response[0].translations[0].text
 
-# --- Adaptador para o Google Cloud Translate ---
-class GoogleCloudService:
+# --- NOVO: Adaptador para o Ollama (Llama 3 Local) ---
+class OllamaService(TranslationService):
     def translate(self, text, config):
-        # Esta API requer um arquivo de credenciais JSON. A configuração é mais complexa.
-        # Por simplicidade, vamos deixar um placeholder.
-        # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'caminho/para/sua/chave.json'
-        # translate_client = translate.Client()
-        # result = translate_client.translate(text, target_language='pt')
-        # return result['translatedText']
-        print("Google Cloud Translate requer configuração avançada de credenciais.")
-        return f"[Google Cloud indisponível] {text}"
+        url = "http://localhost:11434/api/generate"
+        
+        # --- NOVO PROMPT MAIS DIRETO E BASEADO EM EXEMPLOS ---
+        prompt = f"""[INST] Aja como um serviço de tradução que converte valores de um JSON. Traduza apenas o valor do JSON a seguir do inglês para o português do Brasil. Mantenha a chave em inglês. Sua resposta deve ser SOMENTE o JSON traduzido, sem nenhum outro texto.
 
-# --- Dicionário de Provedores (O Coração do Adaptador) ---
+        Entrada:
+        {{
+            "{text}": "{text}"
+        }}
+
+        Saída: [/INST]"""
+
+        data = {
+            "model": config.get("model", "llama3"),
+            "prompt": prompt,
+            "stream": False,
+            "format": "json" # Instrução explícita para o Ollama retornar JSON
+        }
+        
+        response = requests.post(url, json=data)
+        response.raise_for_status()
+        
+        response_json_text = response.json()['response']
+        
+        # Extrai apenas o valor traduzido do JSON retornado
+        translated_dict = json.loads(response_json_text)
+        return list(translated_dict.values())[0]
+
+# --- Dicionário de Provedores ATUALIZADO ---
 AVAILABLE_SERVICES = {
     "Gemini": GeminiService(),
     "DeepL": DeepLService(),
     "Microsoft Azure": AzureService(),
-    # "Google Cloud": GoogleCloudService(), # Desabilitado por ser mais complexo
+    "Llama 3 (Local)": OllamaService(), # ADICIONADO!
 }
 
 def translate_text(servico_escolhido, texto, config):
@@ -80,5 +106,9 @@ def translate_text(servico_escolhido, texto, config):
             service = AVAILABLE_SERVICES[servico_escolhido]
             return service.translate(texto, config)
         except Exception as e:
+            # Retorna uma mensagem de erro clara para o log
+            error_message = str(e)
+            if "Connection refused" in error_message:
+                return "ERRO: Não foi possível conectar ao servidor local do Ollama. Verifique se ele está rodando."
             return f"ERRO na API ({servico_escolhido}): {e}"
     return f"Serviço '{servico_escolhido}' não reconhecido."

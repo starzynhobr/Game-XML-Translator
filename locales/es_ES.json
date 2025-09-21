@@ -42,5 +42,22 @@
     "glossary_add_button": "Añadir Nuevo Término",
     "glossary_save_button": "Guardar y Cerrar",
     "target_tag_label": "Etiqueta de Destino, ej: <dispName> sin los '< >':",
-    "log_glossary_saved": "Glosario guardado con éxito."
+    "extract_button": "Extraer Textos",
+    "import_button": "Importar Traducción",
+    "api_key_prompt": "Por favor, ingrese su clave de API para {provider}:",
+    "api_key_config_title": "Configuración de Clave API ({provider})",
+    "provider_label": "Proveedor de Traducción:",
+    "parent_tag_label": "Etiqueta Padre, ej: <item> sin los '< >':",
+    "warn_load_xml_for_table": "Cargue un archivo XML primero para poblar la tabla.",
+    "log_key_config_cancelled": "Se canceló la configuración de clave para {provider}.",
+    "obtain_provider_key": "Cómo obtener la clave - {provider}",
+    "update_button": "Actualizar",
+    "confirm_update_title": "Confirmar Actualización",
+    "confirm_update_message": "Esto recargará los textos del archivo XML y descartará todas las traducciones no guardadas en la tabla.\n\n¿Desea continuar?",
+    "log_glossary_saved": "Glosario guardado con éxito.",
+    "validate_button": "Validar XML Exportado",
+    "validation_success_title": "Validación Completada",
+    "validation_success_message": "¡ÉXITO! La estructura del archivo exportado es idéntica a la del original.",
+    "validation_fail_title": "Validation Failed",
+    "validation_fail_message": "¡FALLO! La estructura del archivo exportado difiere de la del original.\n\nPor favor, revise el archivo de registro para más detalles."
 }

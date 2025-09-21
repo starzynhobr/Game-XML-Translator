@@ -42,5 +42,22 @@
     "glossary_add_button": "Ajouter un Nouveau Terme",
     "glossary_save_button": "Enregistrer et Fermer",
     "target_tag_label": "Balise Cible, ex : <dispName> sans les '< >' :",
-    "log_glossary_saved": "Glossaire enregistré avec succès."
+    "extract_button": "Extraire les Textes",
+    "import_button": "Importer la Traduction",
+    "api_key_prompt": "Veuillez saisir votre clé API pour {provider} :",
+    "api_key_config_title": "Configuration de la Clé API ({provider})",
+    "provider_label": "Fournisseur de Traduction :",
+    "parent_tag_label": "Balise Parente, ex : <item> sans les '< >' :",
+    "warn_load_xml_for_table": "Veuillez d'abord charger un fichier XML pour remplir le tableau.",
+    "log_key_config_cancelled": "La configuration de la clé pour {provider} a été annulée.",
+    "obtain_provider_key": "Comment obtenir la clé - {provider}",
+    "update_button": "Mettre à jour",
+    "confirm_update_title": "Confirmer la mise à jour",
+    "confirm_update_message": "Cela rechargera les textes du fichier XML et supprimera toutes les traductions non enregistrées dans le tableau.\n\nVoulez-vous continuer ?",
+    "log_glossary_saved": "Glossaire enregistré avec succès.",
+    "validate_button": "Valider le XML Exporté",
+    "validation_success_title": "Validation Terminée",
+    "validation_success_message": "SUCCÈS ! La structure du fichier exporté est identique à l'original.",
+    "validation_fail_title": "Échec de la Validation",
+    "validation_fail_message": "ÉCHEC ! La structure du fichier exporté diffère de l'original."
 }

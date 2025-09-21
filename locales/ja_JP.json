@@ -42,5 +42,22 @@
     "glossary_add_button": "新しい単語を追加",
     "glossary_save_button": "保存して閉じる",
     "target_tag_label": "ターゲットタグ、例: <dispName>（「< >」なし）:",
-    "log_glossary_saved": "用語集が正常に保存されました。"
+    "extract_button": "テキストを抽出",
+    "import_button": "翻訳をインポート",
+    "api_key_prompt": "{provider}のAPIキーを入力してください：",
+    "api_key_config_title": "APIキー設定 ({provider})",
+    "provider_label": "翻訳プロバイダー:",
+    "parent_tag_label": "親タグ、例: <item>（「< >」なし）:",
+    "warn_load_xml_for_table": "テーブルにデータを入力するには、まずXMLファイルを読み込んでください。",
+    "log_key_config_cancelled": "{provider} のキー構成がキャンセルされました。",
+    "obtain_provider_key": "キーの取得方法 - {provider}",
+    "update_button": "更新",
+    "confirm_update_title": "更新の確認",
+    "confirm_update_message": "これにより、XMLファイルからテキストが再読み込みされ、テーブル内の未保存の翻訳はすべて破棄されます。\n\n続行しますか？",
+    "log_glossary_saved": "用語集が正常に保存されました。",
+    "validate_button": "エクスポートされたXMLを検証",
+    "validation_success_title": "検証完了",
+    "validation_success_message": "成功！エクスポートされたファイルの構造は元のファイルと同一です。",
+    "validation_fail_title": "検証失敗",
+    "validation_fail_message": "失敗！エクスポートされたファイルの構造が元のファイルと異なります。"
 }
