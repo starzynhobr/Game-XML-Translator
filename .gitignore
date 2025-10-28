@@ -41,6 +41,8 @@ main.spec
 /*.build/
 /*.dist/
 /*.onefile-build/
+*.exe
+*.bin
 
 # Arquivos do sistema
 .DS_Store
