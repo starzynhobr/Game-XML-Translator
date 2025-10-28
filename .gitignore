@@ -23,6 +23,16 @@ __pycache__/
 # Arquivos de configuração do VSCode
 .vscode/
 
+# arquivo json da api
+config.json
+
+# Pastas de build do PyInstaller
+/dist/
+/build/
+
+# Arquivos de especificação do PyInstaller
+*.spec
+
 # Arquivos de trabalho/checkpoint (podem conter dados do usuário)
 textos_para_traduzir.json
 textos_traduzidos.json
@@ -30,12 +40,6 @@ textos_traduzidos_checkpoint.json
 
 # Glossário do usuário
 scripts/glossario.json
-
-# Arquivos de build do PyInstaller
-/dist/
-/build/
-*.spec
-main.spec
 
 # Arquivos de build do Nuitka
 /*.build/
