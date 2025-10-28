@@ -2,21 +2,28 @@
 
 # Pasta do Ambiente Virtual
 /venv/
+/.venv/
+venv/
+.venv/
 
 # Arquivos de configuração de ambiente (onde está a API Key)
 .env
+config.json
 
 # Arquivos de cache do Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
 # Arquivos de log
 /LOGS/
+*.log
 
 # Arquivos de configuração do VSCode
 .vscode/
 
-#arquivo json da api
+# arquivo json da api
 config.json
 
 # Pastas de build do PyInstaller
@@ -25,3 +32,23 @@ config.json
 
 # Arquivos de especificação do PyInstaller
 *.spec
+
+# Arquivos de trabalho/checkpoint (podem conter dados do usuário)
+textos_para_traduzir.json
+textos_traduzidos.json
+textos_traduzidos_checkpoint.json
+
+# Glossário do usuário
+scripts/glossario.json
+
+# Arquivos de build do Nuitka
+/*.build/
+/*.dist/
+/*.onefile-build/
+*.exe
+*.bin
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+desktop.ini
