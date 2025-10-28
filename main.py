@@ -118,8 +118,14 @@ class TranslatorApp(ctk.CTk):
         self.api_key = self._carregar_api_key_existente()
         
         self.title("Game XML Translator v1.1")
-        self.geometry("1366x768")
-        self.grid_columnconfigure(0, weight=1); self.grid_rowconfigure(0, weight=1)
+        self.geometry("1200x700")
+        self.minsize(1000, 600)  # Define tamanho mínimo da janela
+
+        # Configura grid: colunas laterais fixas, central expansível
+        self.grid_columnconfigure(0, weight=0)  # Coluna esquerda FIXA
+        self.grid_columnconfigure(1, weight=1, minsize=400)  # Coluna central EXPANSÍVEL
+        self.grid_columnconfigure(2, weight=0)  # Coluna direita FIXA (sem minsize)
+        self.grid_rowconfigure(0, weight=1)
 
         self.arquivo_xml_path = ""; self.dados_traducao = {}
         self.cancel_event = threading.Event()
@@ -131,19 +137,22 @@ class TranslatorApp(ctk.CTk):
         }
         self.modelo_selecionado = ctk.StringVar(value=list(self.modelos_disponiveis.keys())[0])
 
-        # Cria PanedWindow para permitir redimensionamento dos painéis
-        from tkinter import PanedWindow
-        self.paned_window = PanedWindow(self, orient="horizontal", sashwidth=5, sashrelief="raised", bg="#2b2b2b")
-        self.paned_window.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        # Cria os três painéis principais
+        self.left_sidebar_frame = ctk.CTkFrame(self, corner_radius=0, width=320)
+        self.left_sidebar_frame.grid(row=0, column=0, sticky="nsw", padx=(5, 2), pady=5)
+        self.left_sidebar_frame.grid_rowconfigure(14, weight=1)
+        self.left_sidebar_frame.grid_propagate(False)  # Mantém largura fixa
 
-        self.left_sidebar_frame = ctk.CTkFrame(self.paned_window, width=300, corner_radius=0); self.left_sidebar_frame.grid_rowconfigure(14, weight=1)
-        self.center_frame = ctk.CTkFrame(self.paned_window, corner_radius=0, fg_color="transparent"); self.center_frame.grid_columnconfigure(0, weight=1); self.center_frame.grid_rowconfigure(0, weight=1)
-        self.right_sidebar_frame = ctk.CTkFrame(self.paned_window, width=300, corner_radius=0); self.right_sidebar_frame.grid_rowconfigure(8, weight=1)
+        self.center_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.center_frame.grid(row=0, column=1, sticky="nsew", padx=2, pady=5)
+        self.center_frame.grid_columnconfigure(0, weight=1)
+        self.center_frame.grid_rowconfigure(0, weight=1)
 
-        # Adiciona os painéis ao PanedWindow
-        self.paned_window.add(self.left_sidebar_frame, minsize=250, width=300)
-        self.paned_window.add(self.center_frame, minsize=400)
-        self.paned_window.add(self.right_sidebar_frame, minsize=250, width=300)
+        self.right_sidebar_frame = ctk.CTkFrame(self, corner_radius=0, width=330)
+        self.right_sidebar_frame.grid(row=0, column=2, sticky="nsew", padx=(2, 5), pady=5)
+        self.right_sidebar_frame.grid_rowconfigure(8, weight=1)
+        self.right_sidebar_frame.grid_columnconfigure(0, weight=1)  # Coluna única com peso
+        self.right_sidebar_frame.grid_propagate(False)  # Mantém largura fixa
         
         # PAINEL ESQUERDO
         # A linha da "mola" foi REMOVIDA. Agora todos os widgets ficarão juntos.
@@ -228,30 +237,30 @@ class TranslatorApp(ctk.CTk):
 
         # PAINEL DIREITO
         self.tools_label = ctk.CTkLabel(self.right_sidebar_frame, text=self.i18n.get("tools_panel_title"), font=ctk.CTkFont(size=20, weight="bold"))
-        self.tools_label.grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 10))
-        
+        self.tools_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+
         # Seleção de Modelo
         self.model_label = ctk.CTkLabel(self.right_sidebar_frame, text=self.i18n.get("ai_model_label"), anchor="w")
-        self.model_label.grid(row=1, column=0, columnspan=2, padx=20, pady=(10, 0), sticky="w")
-        
+        self.model_label.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
+
         self.model_optionmenu = ctk.CTkOptionMenu(self.right_sidebar_frame, variable=self.modelo_selecionado, values=list(self.modelos_disponiveis.keys()))
-        self.model_optionmenu.grid(row=2, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
-        
+        self.model_optionmenu.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
+
         self.traduzir_tudo_button = ctk.CTkButton(self.right_sidebar_frame, text="Traduzir Itens Pendentes (IA)", command=self.iniciar_traducao_em_massa_resumivel)
-        self.traduzir_tudo_button.grid(row=3, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
-        
+        self.traduzir_tudo_button.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+
         self.original_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100)
-        self.original_textbox.grid(row=4, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
+        self.original_textbox.grid(row=4, column=0, padx=20, pady=(0, 10), sticky="ew")
         self.original_textbox.configure(state="disabled")
-        
+
         self.traducao_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100)
-        self.traducao_textbox.grid(row=5, column=0, columnspan=2, padx=20, pady=(0, 20), sticky="ew")
-        
+        self.traducao_textbox.grid(row=5, column=0, padx=20, pady=(0, 20), sticky="ew")
+
         self.sugestao_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("generate_suggestion_button"), command=self.iniciar_traducao_linha_selecionada)
-        self.sugestao_button.grid(row=6, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
-        
+        self.sugestao_button.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
+
         self.aprovar_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("approve_button"), fg_color="green", hover_color="darkgreen", command=self.aprovar_traducao)
-        self.aprovar_button.grid(row=9, column=0, columnspan=2, padx=20, pady=10, sticky="s")
+        self.aprovar_button.grid(row=9, column=0, padx=20, pady=10, sticky="s")
         
         self.update_ui_texts()
         self.log(self.i18n.get("log_welcome"))
