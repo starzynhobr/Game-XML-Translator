@@ -119,11 +119,11 @@ class TranslatorApp(ctk.CTk):
         
         self.title("Game XML Translator v1.1")
         self.geometry("1366x768")
-        self.grid_columnconfigure(1, weight=1); self.grid_rowconfigure(0, weight=1)
-        
+        self.grid_columnconfigure(0, weight=1); self.grid_rowconfigure(0, weight=1)
+
         self.arquivo_xml_path = ""; self.dados_traducao = {}
         self.cancel_event = threading.Event()
-        self.translation_queue = queue.Queue() 
+        self.translation_queue = queue.Queue()
 
         self.modelos_disponiveis = {
             "Gemini 1.5 Flash (Rápido)": ("models/gemini-1.5-flash-latest", 5),
@@ -131,9 +131,19 @@ class TranslatorApp(ctk.CTk):
         }
         self.modelo_selecionado = ctk.StringVar(value=list(self.modelos_disponiveis.keys())[0])
 
-        self.left_sidebar_frame = ctk.CTkFrame(self, width=300, corner_radius=0); self.left_sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5); self.left_sidebar_frame.grid_rowconfigure(14, weight=1)
-        self.center_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent"); self.center_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5); self.center_frame.grid_columnconfigure(0, weight=1); self.center_frame.grid_rowconfigure(0, weight=1)
-        self.right_sidebar_frame = ctk.CTkFrame(self, width=300, corner_radius=0); self.right_sidebar_frame.grid(row=0, column=2, sticky="nsew"); self.right_sidebar_frame.grid_rowconfigure(8, weight=1)
+        # Cria PanedWindow para permitir redimensionamento dos painéis
+        from tkinter import PanedWindow
+        self.paned_window = PanedWindow(self, orient="horizontal", sashwidth=5, sashrelief="raised", bg="#2b2b2b")
+        self.paned_window.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        self.left_sidebar_frame = ctk.CTkFrame(self.paned_window, width=300, corner_radius=0); self.left_sidebar_frame.grid_rowconfigure(14, weight=1)
+        self.center_frame = ctk.CTkFrame(self.paned_window, corner_radius=0, fg_color="transparent"); self.center_frame.grid_columnconfigure(0, weight=1); self.center_frame.grid_rowconfigure(0, weight=1)
+        self.right_sidebar_frame = ctk.CTkFrame(self.paned_window, width=300, corner_radius=0); self.right_sidebar_frame.grid_rowconfigure(8, weight=1)
+
+        # Adiciona os painéis ao PanedWindow
+        self.paned_window.add(self.left_sidebar_frame, minsize=250, width=300)
+        self.paned_window.add(self.center_frame, minsize=400)
+        self.paned_window.add(self.right_sidebar_frame, minsize=250, width=300)
         
         # PAINEL ESQUERDO
         # A linha da "mola" foi REMOVIDA. Agora todos os widgets ficarão juntos.
@@ -149,21 +159,21 @@ class TranslatorApp(ctk.CTk):
         
         self.io_frame = ctk.CTkFrame(self.left_sidebar_frame)
         self.io_frame.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
-        self.io_frame.grid_columnconfigure((0, 1, 2, 3), weight=1) # Agora com 4 colunas
+        self.io_frame.grid_columnconfigure((0, 1), weight=1) # 2 colunas com peso igual
 
-        # Botões de Importação
-        self.import_json_button = ctk.CTkButton(self.io_frame, text="Importar JSON", command=self.importar_json_traduzido)
-        self.import_json_button.grid(row=0, column=1, padx=(0, 5), pady=5, sticky="ew")
-
-        self.import_csv_button = ctk.CTkButton(self.io_frame, text="Importar CSV", command=self.importar_de_csv) # NOVO BOTÃO
-        self.import_csv_button.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
-
-        # Botões de Exportação
+        # Botões de Exportação (Primeira Linha)
         self.export_json_button = ctk.CTkButton(self.io_frame, text="Exportar JSON", command=self.exportar_json_para_traducao)
-        self.export_json_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        self.export_json_button.grid(row=0, column=0, padx=(5, 2), pady=(5, 2), sticky="ew")
 
         self.export_csv_button = ctk.CTkButton(self.io_frame, text="Exportar CSV", command=self.exportar_para_csv)
-        self.export_csv_button.grid(row=0, column=2, padx=(5, 0), pady=5, sticky="ew")
+        self.export_csv_button.grid(row=0, column=1, padx=(2, 5), pady=(5, 2), sticky="ew")
+
+        # Botões de Importação (Segunda Linha)
+        self.import_json_button = ctk.CTkButton(self.io_frame, text="Importar JSON", command=self.importar_json_traduzido)
+        self.import_json_button.grid(row=1, column=0, padx=(5, 2), pady=(2, 5), sticky="ew")
+
+        self.import_csv_button = ctk.CTkButton(self.io_frame, text="Importar CSV", command=self.importar_de_csv)
+        self.import_csv_button.grid(row=1, column=1, padx=(2, 5), pady=(2, 5), sticky="ew")
 
         # IMPORTANTE: Ajuste o número da linha (row) dos widgets que vêm depois!
         # Por exemplo, o lang_optionmenu agora deve estar na row=4, o caminho_arquivo_entry na row=5, etc.
