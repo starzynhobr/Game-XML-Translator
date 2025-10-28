@@ -1,0 +1,27 @@
+{
+    "pt_BR": {
+        "Gemini": "1. Vá para o Google AI Studio.\n2. Faça login com sua conta Google.\n3. Clique em 'Get API key' no canto superior esquerdo.\n4. Crie uma nova chave de API em um projeto novo ou existente.\n5. Copie e cole a chave aqui.",
+        "DeepL": "1. Crie uma conta no site da DeepL.\n2. Vá para a seção 'DeepL API Free' no seu perfil.\n3. Encontre sua 'Authentication Key' (Chave de Autenticação).\n4. Copie e cole a chave aqui.",
+        "Microsoft Azure": "1. Crie uma conta gratuita no portal da Microsoft Azure.\n2. No portal, procure e crie um recurso do tipo 'Tradutor' (Translator).\n3. Após a criação, vá para a seção 'Chaves e Ponto de Extremidade' (Keys and Endpoint).\n4. Você precisará de duas coisas: uma das 'CHAVES' (Key 1 ou Key 2) e a 'LOCALIZAÇÃO/REGIÃO' do seu recurso (ex: 'eastus')."
+    },
+    "en_US": {
+        "Gemini": "1. Go to Google AI Studio.\n2. Log in with your Google account.\n3. Click on 'Get API key' in the top left corner.\n4. Create a new API key in a new or existing project.\n5. Copy and paste the key here.",
+        "DeepL": "1. Create an account on the DeepL website.\n2. Go to the 'DeepL API Free' section in your profile.\n3. Find your 'Authentication Key'.\n4. Copy and paste the key here.",
+        "Microsoft Azure": "1. Create a free account on the Microsoft Azure portal.\n2. In the portal, search for and create a 'Translator' resource.\n3. After creation, go to the 'Keys and Endpoint' section.\n4. You will need two things: one of the 'KEYS' (Key 1 or Key 2) and the 'LOCATION/REGION' of your resource (e.g., 'eastus')."
+    },
+    "es_ES": {
+        "Gemini": "1. Vaya a Google AI Studio.\n2. Inicie sesión con su cuenta de Google.\n3. Haga clic en 'Get API key' en la esquina superior izquierda.\n4. Cree una nueva clave de API en un proyecto nuevo o existente.\n5. Copie y pegue la clave aquí.",
+        "DeepL": "1. Cree una cuenta en el sitio web de DeepL.\n2. Vaya a la sección 'DeepL API Free' en su perfil.\n3. Encuentre su 'Authentication Key' (Clave de Autenticación).\n4. Copie y pegue la clave aquí.",
+        "Microsoft Azure": "1. Cree una cuenta gratuita en el portal de Microsoft Azure.\n2. En el portal, busque y cree un recurso de tipo 'Traductor' (Translator).\n3. Después de la creación, vaya a la sección 'Claves y punto de conexión' (Keys and Endpoint).\n4. Necesitará dos cosas: una de las 'CLAVES' (Key 1 o Key 2) y la 'UBICACIÓN/REGIÓN' de su recurso (ej: 'eastus')."
+    },
+    "fr_FR": {
+        "Gemini": "1. Allez sur Google AI Studio.\n2. Connectez-vous avec votre compte Google.\n3. Cliquez sur 'Get API key' dans le coin supérieur gauche.\n4. Créez une nouvelle clé API dans un projet nouveau ou existant.\n5. Copiez et collez la clé ici.",
+        "DeepL": "1. Créez un compte sur le site de DeepL.\n2. Allez dans la section 'DeepL API Free' de votre profil.\n3. Trouvez votre 'Authentication Key' (Clé d'authentification).\n4. Copiez et collez la clé ici.",
+        "Microsoft Azure": "1. Créez un compte gratuit sur le portail Microsoft Azure.\n2. Dans le portail, recherchez et créez une ressource 'Traducteur' (Translator).\n3. Après la création, allez dans la section 'Clés et point de terminaison' (Keys and Endpoint).\n4. Vous aurez besoin de deux choses : une des 'CLÉS' (Key 1 ou Key 2) et la 'LOCALISATION/RÉGION' de votre ressource (ex : 'eastus')."
+    },
+    "ja_JP": {
+        "Gemini": "1. Google AI Studioにアクセスします。\n2. Googleアカウントでログインします。\n3. 左上の「Get API key」をクリックします。\n4. 新規または既存のプロジェクトで新しいAPIキーを作成します。\n5. キーをここにコピー＆ペーストします。",
+        "DeepL": "1. DeepLのウェブサイトでアカウントを作成します。\n2. プロフィールの「DeepL API Free」セクションに移動します。\n3. 「Authentication Key」（認証キー）を見つけます。\n4. キーをここにコピー＆ペーストします。",
+        "Microsoft Azure": "1. Microsoft Azureポータルで無料アカウントを作成します。\n2. ポータルで「翻訳者」(Translator)リソースを検索して作成します。\n3. 作成後、「キーとエンドポイント」(Keys and Endpoint)セクションに移動します。\n4. 「キー」(Key 1またはKey 2)のいずれかと、リソースの「場所/地域」(Location/Region)（例: 'eastus'）の2つが必要です。"
+    }
+}
