@@ -1,39 +1,25 @@
 @echo off
-REM Script para compilar o aplicativo com Nuitka
-REM Resolve problemas de DLL do Python
+REM Script simplificado para compilar com Nuitka usando Python do sistema
 
 echo ========================================
-echo  Compilando com Nuitka
+echo  Build Simplificado com Nuitka
 echo ========================================
 echo.
 
-REM Ativa o ambiente virtual se existir
-if exist ".venv\Scripts\activate.bat" (
-    echo Ativando ambiente virtual...
-    call .venv\Scripts\activate.bat
-) else if exist "venv\Scripts\activate.bat" (
-    echo Ativando ambiente virtual...
-    call venv\Scripts\activate.bat
-)
-
-echo.
-echo Instalando/Atualizando Nuitka no ambiente virtual...
-python -m pip install --upgrade pip
-python -m pip install --upgrade nuitka ordered-set zstandard
+echo Instalando Nuitka no Python do sistema...
+python -m pip install --user --upgrade nuitka ordered-set zstandard
 
 echo.
 echo ========================================
-echo  Iniciando compilacao...
+echo  Compilando...
 echo ========================================
 echo.
 
 REM Verifica se o ícone existe
 set ICON_PARAM=
 if exist "assets\icon.ico" (
-    echo Icone encontrado, incluindo no build...
+    echo Icone encontrado...
     set ICON_PARAM=--windows-icon-from-ico=assets/icon.ico
-) else (
-    echo Aviso: icon.ico nao encontrado em assets/, compilando sem icone...
 )
 
 python -m nuitka ^
@@ -54,23 +40,22 @@ python -m nuitka ^
     --file-version=1.2.0.0 ^
     --product-version=1.2.0.0 ^
     --file-description="Tradutor de arquivos XML de jogos" ^
-    --windows-uac-admin=no ^
     main.py
 
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo ========================================
-    echo  Compilacao concluida com sucesso!
+    echo  Compilacao concluida!
     echo ========================================
     echo.
-    echo O executavel foi gerado em: dist\GameXMLTranslator.exe
+    echo Executavel: dist\GameXMLTranslator.exe
     echo.
-    pause
 ) else (
     echo.
     echo ========================================
-    echo  ERRO na compilacao!
+    echo  ERRO!
     echo ========================================
     echo.
-    pause
 )
+
+pause
