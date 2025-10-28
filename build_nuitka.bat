@@ -26,11 +26,20 @@ echo  Iniciando compilacao...
 echo ========================================
 echo.
 
+REM Verifica se o ícone existe
+set ICON_PARAM=
+if exist "assets\icon.ico" (
+    echo Icone encontrado, incluindo no build...
+    set ICON_PARAM=--windows-icon-from-ico=assets/icon.ico
+) else (
+    echo Aviso: icon.ico nao encontrado em assets/, compilando sem icone...
+)
+
 python -m nuitka ^
     --standalone ^
     --onefile ^
     --enable-plugin=tk-inter ^
-    --windows-icon-from-ico=assets/icon.ico ^
+    %ICON_PARAM% ^
     --windows-console-mode=disable ^
     --include-data-dir=locales=locales ^
     --include-data-dir=assets=assets ^
