@@ -39,6 +39,16 @@ python main.py
 
 > Tip: the interface detects available locales from `locales/*.json`. Edit or add new files to localize the UI.
 
+## Using the App
+
+1. Open an XML file (`Arquivo XML Original`) and, if needed, choose the parent/target tags that contain the dialogue lines.  
+2. Select the language for the UI and connect a translation provider (set your API key via the settings button).  
+3. Click “Extrair texto” to populate the table. You can review or edit translations manually in the right pane.  
+4. Use “Traduzir Selecionado” or “Traduzir Tudo” to call the chosen translation service; adjust wording directly in the table or textbox.  
+5. Export with “Salvar XML traduzido”: pick the output path and the tool will inject the translations while keeping the original structure.
+
+> Tested primarily with Marvel Avengers Alliance Redux assets, but the workflow handles generic XML files without namespaces. For other games, confirm the target tag names match their structure.
+
 ## Building a Standalone Executable
 
 The project ships with a build script for Nuitka:
