@@ -11,6 +11,14 @@ from core.extrator import extrair_textos
 from core.injetor import injetar_traducoes
 from core.i18n import I18nManager
 
+TRANSLATION_TARGETS = {
+    "pt": {"code": "pt", "deepl": "PT-BR", "label": "Portuguese (Brazil)"},
+    "en": {"code": "en", "deepl": "EN-US", "label": "English"},
+    "es": {"code": "es", "deepl": "ES", "label": "Spanish"},
+    "fr": {"code": "fr", "deepl": "FR", "label": "French"},
+    "ja": {"code": "ja", "deepl": "JA", "label": "Japanese"},
+}
+
 def resource_path(relative_path):
     """Resolve paths for bundled data in script and frozen modes."""
     base_path = getattr(sys, "_MEIPASS", None)  # PyInstaller
@@ -114,9 +122,11 @@ class TranslatorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.i18n = I18nManager(language="pt_BR") # Começa em português
+        self.source_language_label = "English"
         self._carregar_idiomas_disponiveis()
         nome_amigavel_inicial = [name for name, code in self.idiomas_disponiveis.items() if code == self.i18n.language][0]
         self.language_variable = ctk.StringVar(value=nome_amigavel_inicial) 
+        self.translation_target = self._resolve_translation_target(self.i18n.language)
         self.api_key = self._carregar_api_key_existente()
         
         self.title("Game XML Translator v1.1")
@@ -439,6 +449,7 @@ class TranslatorApp(ctk.CTk):
         lang_code = self.idiomas_disponiveis.get(language_choice)
         if lang_code:
             self.i18n.load_language(lang_code)
+            self.translation_target = self._resolve_translation_target(lang_code)
             self.update_ui_texts()
             self.log(self.i18n.get("changed_language", lang_name=language_choice))
 
@@ -550,6 +561,15 @@ class TranslatorApp(ctk.CTk):
                 except Exception as e:
                     print(f"Erro ao carregar o idioma {filename}: {e}")
 
+    def _resolve_translation_target(self, locale_code):
+        """Map UI locale to translation target metadata."""
+        base = (locale_code or "").split("_")[0].lower()
+        meta = TRANSLATION_TARGETS.get(base)
+        if meta:
+            return dict(meta)
+        fallback = base or "en"
+        return {"code": fallback, "deepl": fallback.upper(), "label": fallback.title()}
+
     def update_ui_texts(self):
         """
         Esta função é o "coração" da troca de idioma. Ela passa por todos
@@ -620,7 +640,15 @@ class TranslatorApp(ctk.CTk):
         self.after(0, lambda: self.tree.item(selected_item_id, tags=('traduzindo',)))
         
         modelo_escolhido, _ = self.modelos_disponiveis[self.modelo_selecionado.get()]
-        config = {"api_key": self.api_key, "model": modelo_escolhido}
+        meta = self.translation_target or {"code": "pt", "deepl": "PT-BR", "label": "Portuguese (Brazil)"}
+        config = {
+            "api_key": self.api_key,
+            "model": modelo_escolhido,
+            "target_lang": meta.get("code", "pt"),
+            "target_label": meta.get("label", "Portuguese (Brazil)"),
+            "deepl_lang": meta.get("deepl", "PT-BR"),
+            "source_label": self.source_language_label,
+        }
         traducao_sugerida = translate_text("Gemini", original_text, config)
         
         self.after(0, lambda: self._update_ui_com_traducao(selected_item_id, traducao_sugerida))
@@ -729,19 +757,24 @@ class TranslatorApp(ctk.CTk):
         self.translation_queue.put(("DONE", "DONE"))
 
     def _traduzir_lote_api(self, lote_de_texto):
-        """Função auxiliar que efetivamente chama a API Gemini."""
+        """Funcao auxiliar que efetivamente chama a API Gemini."""
         try:
             genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest")
-            prompt = f"""Aja como um tradutor técnico especializado em localização de jogos.
-    A seguir está um bloco de textos para tradução, cada um com um ID único.
-    Traduza o conteúdo de cada item do inglês para o português do Brasil.
-    Sua resposta DEVE manter EXATAMENTE o mesmo formato de [ID: ...] e separadores ---, substituindo apenas o texto em inglês pelo traduzido.
-
-    ---INÍCIO DO BLOCO---
-    {lote_de_texto}
-    ---FIM DO BLOCO---
-    """
+            modelo_nome, _ = self.modelos_disponiveis.get(
+                self.modelo_selecionado.get(),
+                ("models/gemini-1.5-flash-latest", 0),
+            )
+            model = genai.GenerativeModel(model_name=modelo_nome)
+            meta = self.translation_target or {"label": "Portuguese (Brazil)"}
+            target_label = meta.get("label", "Portuguese (Brazil)")
+            prompt = (
+                "Act as a game localization specialist.\n"
+                "Each entry below is formatted as [ID: ...] followed by text.\n"
+                f"Translate every entry to {target_label}. Keep the IDs and separators exactly as provided.\n\n"
+                "---BEGIN BLOCK---\n"
+                f"{lote_de_texto}\n"
+                "---END BLOCK---\n"
+            )
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
