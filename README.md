@@ -55,7 +55,6 @@ The project ships with a build script for Nuitka:
 
 ```powershell
 build_nuitka.bat
-```
 
 This script activates `.venv`, installs or updates Nuitka, bundles the assets and locales, and produces `dist/GameXMLTranslator.exe` with the project icon.
 
@@ -104,3 +103,7 @@ Bug reports and pull requests are welcome! Please open an issue first to discuss
 ## License
 
 See `LICENSE`. All rights reserved; contact the author for reuse permissions.
+
+
+### Gemini API Tips
+- When using the free tier, prefer models like "Gemini 2.0 Flash" or other flash variants; preview/pro models (e.g., 2.5 Pro) may have zero free quota and return 429 errors.
