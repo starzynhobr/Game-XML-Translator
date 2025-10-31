@@ -1,0 +1,90 @@
+# Game XML Translator
+
+Desktop tool that helps modders and localization teams translate XML dialogue files. It provides a CustomTkinter interface to preview original strings, apply machine translations, review them faster, and export an updated XML without breaking the structure of the game file.
+
+## Features
+
+- XML extractor/injector that preserves node order and attributes.
+- CustomTkinter UI with dark theme, progress tracking, and quick filters.
+- Multiple translation providers (via `core/tradutor_api`), including support for API keys such as Google Gemini.
+- Glossary manager (`scripts/glossario.json`) to enforce project terminology.
+- Multi-language interface managed by JSON files in `locales/`.
+- One-click export back to XML with structural validation helpers.
+
+## Quick Start
+
+Requirements:
+
+- Python 3.11 (recommended)  
+- Windows 10/11 with Visual C++ Build Tools (needed only for compilation)  
+- A translation provider API key (optional, but required for automated translations)
+
+Clone the repository and set up a virtual environment:
+
+```powershell
+git clone https://github.com/<your-user>/Game-XML-Translator.git
+cd Game-XML-Translator
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Run the app from source:
+
+```powershell
+python main.py
+```
+
+> Tip: the interface detects available locales from `locales/*.json`. Edit or add new files to localize the UI.
+
+## Building a Standalone Executable
+
+The project ships with a build script for Nuitka:
+
+```powershell
+build_nuitka.bat
+```
+
+This script activates `.venv`, installs or updates Nuitka, bundles the assets and locales, and produces `dist/GameXMLTranslator.exe` with the project icon.
+
+Manual build example (same flags used by the script):
+
+```powershell
+python -m nuitka ^
+    --standalone --onefile ^
+    --enable-plugin=tk-inter ^
+    --windows-console-mode=disable ^
+    --windows-icon-from-ico=assets/icon.ico ^
+    --include-data-dir=locales=locales ^
+    main.py
+```
+
+If you need to distribute the executable, prefer creating a GitHub Release instead of committing the `.exe` file to version control.
+
+## Project Layout
+
+- `main.py` – GUI entry point with translation workflow.
+- `core/` – XML extraction/injection logic, translation service adapters, and i18n manager.
+- `locales/` – UI translations in JSON.
+- `assets/` – Static assets such as the application icon.
+- `scripts/` – Glossary JSON and additional helpers.
+- `build_nuitka.bat` – Automated Nuitka build script.
+
+## Troubleshooting
+
+- **Module not found / customtkinter**: ensure the virtual environment is activated and dependencies are installed.
+- **Large executable**: this is expected for `--onefile`. Switch to `--standalone` for a folder-based build.
+- **Build failures on Windows**: install the “Desktop development with C++” workload from Visual Studio Build Tools.
+- **Locale not loading**: verify the JSON filename matches the locale code (e.g., `pt_BR.json`) and contains valid JSON.
+
+## Short Summary in Portuguese
+
+Game XML Translator e uma ferramenta desktop para traduzir arquivos XML de jogos. O projeto inclui interface em CustomTkinter, suporte a servicos de traducao automatica, glossario personalizavel e scripts para gerar um executavel standalone com Nuitka. Veja `BUILD.md` para passos detalhados de compilacao.
+
+## Contributing
+
+Bug reports and pull requests are welcome! Please open an issue first to discuss major changes. For pull requests, run the application locally to verify that locale files and glossary loading still work.
+
+## License
+
+Project license has not been defined yet. Add a `LICENSE` file or update this section once you choose one.
