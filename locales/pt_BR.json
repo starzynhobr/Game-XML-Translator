@@ -70,5 +70,7 @@
     "glossary_add_button": "Adicionar Novo Termo",
     "glossary_save_button": "Salvar e Fechar",
     "select_xml_file": "Selecione um Arquivo XML",
-    "update_button": "Atualizar"
+    "update_button": "Atualizar",
+    "api_key_config": "Configurar API",
+    "api_gemini_key": "Por favor, insira sua chave de API do Google Gemini:"
 }

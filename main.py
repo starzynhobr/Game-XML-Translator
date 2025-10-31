@@ -1,7 +1,7 @@
 import customtkinter as ctk
 from tkinter import filedialog, ttk, messagebox
 import os, json, threading, time, sys, csv, re, queue
-from core.tradutor_api import translate_text, AVAILABLE_SERVICES
+from core.tradutor_api import translate_text, AVAILABLE_SERVICES, get_gemini_model
 from dotenv import load_dotenv
 import google.generativeai as genai
 
@@ -123,11 +123,11 @@ class TranslatorApp(ctk.CTk):
         super().__init__()
         self.i18n = I18nManager(language="pt_BR") # Começa em português
         self.source_language_label = "English"
+        self.preferred_model_id = None
         self._carregar_idiomas_disponiveis()
         nome_amigavel_inicial = [name for name, code in self.idiomas_disponiveis.items() if code == self.i18n.language][0]
         self.language_variable = ctk.StringVar(value=nome_amigavel_inicial) 
         self.translation_target = self._resolve_translation_target(self.i18n.language)
-        self.api_key = self._carregar_api_key_existente()
         
         self.title("Game XML Translator v1.1")
         self.geometry("1200x700")
@@ -144,10 +144,12 @@ class TranslatorApp(ctk.CTk):
         self.translation_queue = queue.Queue()
 
         self.modelos_disponiveis = {
-            "Gemini 1.5 Flash (Rápido)": ("models/gemini-1.5-flash-latest", 5),
-            "Gemini 2.5 Pro (Qualidade)": ("models/gemini-2.5-pro", 31)
+            "Gemini 1.5 Flash (Rapido)": ("gemini-1.5-flash", 5),
+            "Gemini 1.5 Pro (Qualidade)": ("gemini-1.5-pro", 31)
         }
         self.modelo_selecionado = ctk.StringVar(value=list(self.modelos_disponiveis.keys())[0])
+        self.preferred_model_id = self.modelos_disponiveis[self.modelo_selecionado.get()][0]
+        self.api_key = self._carregar_api_key_existente()
 
         # Cria os três painéis principais
         self.left_sidebar_frame = ctk.CTkFrame(self, corner_radius=0, width=320)
@@ -255,27 +257,32 @@ class TranslatorApp(ctk.CTk):
         self.model_label = ctk.CTkLabel(self.right_sidebar_frame, text=self.i18n.get("ai_model_label"), anchor="w")
         self.model_label.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
 
-        self.model_optionmenu = ctk.CTkOptionMenu(self.right_sidebar_frame, variable=self.modelo_selecionado, values=list(self.modelos_disponiveis.keys()))
+        self.model_optionmenu = ctk.CTkOptionMenu(self.right_sidebar_frame, variable=self.modelo_selecionado, values=list(self.modelos_disponiveis.keys()), command=self._on_model_change)
         self.model_optionmenu.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
 
+        self.api_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("api_key_config"), command=self.configurar_api_key)
+        self.api_button.grid(row=3, column=0, padx=20, pady=(0, 10), sticky="ew")
+
         self.traduzir_tudo_button = ctk.CTkButton(self.right_sidebar_frame, text="Traduzir Itens Pendentes (IA)", command=self.iniciar_traducao_em_massa_resumivel)
-        self.traduzir_tudo_button.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+        self.traduzir_tudo_button.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
 
         self.original_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100)
-        self.original_textbox.grid(row=4, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.original_textbox.grid(row=5, column=0, padx=20, pady=(0, 10), sticky="ew")
         self.original_textbox.configure(state="disabled")
 
         self.traducao_textbox = ctk.CTkTextbox(self.right_sidebar_frame, height=100)
-        self.traducao_textbox.grid(row=5, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.traducao_textbox.grid(row=6, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         self.sugestao_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("generate_suggestion_button"), command=self.iniciar_traducao_linha_selecionada)
-        self.sugestao_button.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
+        self.sugestao_button.grid(row=7, column=0, padx=20, pady=10, sticky="ew")
 
         self.aprovar_button = ctk.CTkButton(self.right_sidebar_frame, text=self.i18n.get("approve_button"), fg_color="green", hover_color="darkgreen", command=self.aprovar_traducao)
         self.aprovar_button.grid(row=9, column=0, padx=20, pady=10, sticky="s")
         
         self.update_ui_texts()
         self.log(self.i18n.get("log_welcome"))
+        if self.api_key:
+            self.after(200, self._sincronizar_modelos_disponiveis)
 
     def log(self, message):
         self.log_textbox.configure(state="normal")
@@ -288,12 +295,57 @@ class TranslatorApp(ctk.CTk):
         config_path = "config.json"
         if os.path.exists(config_path):
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+                    preferred_model = config.get("preferred_model")
+                    self.preferred_model_id = config.get("preferred_model_id", self.preferred_model_id)
+                    if preferred_model and preferred_model in self.modelos_disponiveis:
+                        self.modelo_selecionado.set(preferred_model)
+                        self.preferred_model_id = self.modelos_disponiveis[preferred_model][0]
+                    elif self.preferred_model_id:
+                        for label, (model_id, _) in self.modelos_disponiveis.items():
+                            if model_id == self.preferred_model_id:
+                                self.modelo_selecionado.set(label)
+                                break
                     return config.get("api_key")
             except (FileNotFoundError, json.JSONDecodeError):
                 return None
         return None
+
+    def _salvar_config(self):
+        """Persiste configurações como chave da API e modelo preferido."""
+        data = {}
+        if self.api_key:
+            data["api_key"] = self.api_key
+        selected_model = self.modelo_selecionado.get() if hasattr(self, "modelo_selecionado") else None
+        if selected_model:
+            data["preferred_model"] = selected_model
+            info = self.modelos_disponiveis.get(selected_model)
+            if info:
+                self.preferred_model_id = info[0]
+                data["preferred_model_id"] = self.preferred_model_id
+        elif self.preferred_model_id:
+            data["preferred_model_id"] = self.preferred_model_id
+        config_path = "config.json"
+        if data:
+            try:
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+            except OSError as exc:
+                self.log(f"Falha ao salvar config.json: {exc}")
+        elif os.path.exists(config_path):
+            try:
+                os.remove(config_path)
+            except OSError as exc:
+                self.log(f"Falha ao remover config.json: {exc}")
+
+    def _on_model_change(self, selection):
+        if selection in self.modelos_disponiveis:
+            self.modelo_selecionado.set(selection)
+            info = self.modelos_disponiveis.get(selection)
+            if info:
+                self.preferred_model_id = info[0]
+            self._salvar_config()
 
     def importar_de_csv(self):
         """Lê um arquivo CSV e atualiza as traduções na tabela."""
@@ -570,6 +622,57 @@ class TranslatorApp(ctk.CTk):
         fallback = base or "en"
         return {"code": fallback, "deepl": fallback.upper(), "label": fallback.title()}
 
+    def _format_model_label(self, model_name: str) -> str:
+        base = model_name.split("/")[-1]
+        if base.startswith("gemini-"):
+            base = base[len("gemini-"):]
+        parts = base.split("-")
+        if parts and parts[-1].lower() == "latest":
+            parts[-1] = "(Latest)"
+        parts = [p.upper() if p.isalpha() and len(p) <= 2 else p.capitalize() for p in parts]
+        return "Gemini " + " ".join(parts)
+
+    def _sincronizar_modelos_disponiveis(self):
+        """Atualiza a lista de modelos Gemini usando a API, se possível."""
+        if not self.api_key:
+            return
+
+        def worker():
+            try:
+                genai.configure(api_key=self.api_key)
+                modelos_map = {}
+                for model in genai.list_models():
+                    supported = getattr(model, "supported_generation_methods", [])
+                    if "generateContent" in supported:
+                        label = self._format_model_label(model.name)
+                        modelos_map[label] = (model.name, 32)
+                if not modelos_map:
+                    raise RuntimeError("Nenhum modelo Gemini com suporte a generateContent foi encontrado.")
+            except Exception as exc:
+                self.after(0, lambda: self.log(f"Falha ao listar modelos Gemini: {exc}"))
+                return
+
+            def atualizar_ui():
+                self.modelos_disponiveis = modelos_map
+                valores = list(modelos_map.keys())
+                self.model_optionmenu.configure(values=valores)
+                selecionado = None
+                if self.preferred_model_id:
+                    for label, (model_id, _) in modelos_map.items():
+                        if model_id == self.preferred_model_id:
+                            selecionado = label
+                            break
+                if not selecionado or selecionado not in modelos_map:
+                    selecionado = valores[0]
+                self.modelo_selecionado.set(selecionado)
+                self.preferred_model_id = modelos_map[selecionado][0]
+                self._salvar_config()
+                self.log(f"Modelos Gemini carregados ({len(valores)})")
+
+            self.after(0, atualizar_ui)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def update_ui_texts(self):
         """
         Esta função é o "coração" da troca de idioma. Ela passa por todos
@@ -603,6 +706,7 @@ class TranslatorApp(ctk.CTk):
         # --- Painel Direito ---
         self.tools_label.configure(text=self.i18n.get("tools_panel_title"))
         self.model_label.configure(text=self.i18n.get("ai_model_label"))
+        self.api_button.configure(text=self.i18n.get("api_key_config"))
         
         # Lógica para não sobrescrever o botão se ele estiver em modo "Cancelar" ou "Traduzindo"
         current_button_text = self.traduzir_tudo_button.cget("text")
@@ -762,9 +866,9 @@ class TranslatorApp(ctk.CTk):
             genai.configure(api_key=self.api_key)
             modelo_nome, _ = self.modelos_disponiveis.get(
                 self.modelo_selecionado.get(),
-                ("models/gemini-1.5-flash-latest", 0),
+                ("gemini-1.5-flash", 0),
             )
-            model = genai.GenerativeModel(model_name=modelo_nome)
+            model = get_gemini_model(modelo_nome)
             meta = self.translation_target or {"label": "Portuguese (Brazil)"}
             target_label = meta.get("label", "Portuguese (Brazil)")
             prompt = (
@@ -846,25 +950,30 @@ class TranslatorApp(ctk.CTk):
         self.progressbar.set(progresso)
 
 
-    def _ensure_api_key(self):
+    def configurar_api_key(self):
+        """Permite atualizar a chave de API manualmente."""
+        self._ensure_api_key(force=True)
+
+    def _ensure_api_key(self, force=False):
         """Verifica se a chave API existe. Se não, pede ao usuário. Retorna True se a chave estiver disponível."""
-        if self.api_key:
+        if self.api_key and not force:
             return True
 
-        # Se não houver chave, agora sim pedimos ao usuário
         dialog = ctk.CTkInputDialog(text=self.i18n.get("api_gemini_key"), title=self.i18n.get("api_key_config"))
         key = dialog.get_input()
 
         if key:
-            self.api_key = key
-            # Salva a chave para futuras sessões
-            with open("config.json", 'w') as f:
-                json.dump({"api_key": key}, f)
+            self.api_key = key.strip()
+            self._salvar_config()
+            self._sincronizar_modelos_disponiveis()
             self.log("Chave de API configurada com sucesso.")
             return True
+
+        if self.api_key and force:
+            self.log("Atualizacao da chave API cancelada.")
         else:
-            self.log(self.i18n.get("log_api_key_needed")) # Você precisará adicionar essa string no seu i18n
-            return False
+            self.log(self.i18n.get("log_api_key_needed"))
+        return False
 
     def exportar_xml_traduzido(self):
         if not self.arquivo_xml_path:

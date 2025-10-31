@@ -5,6 +5,7 @@ import deepl
 from azure.ai.translation.text import TextTranslationClient
 from azure.core.credentials import AzureKeyCredential
 import google.generativeai as genai
+from google.api_core.exceptions import NotFound as GoogleNotFound
 
 
 class TranslationService:
@@ -27,6 +28,41 @@ def carregar_glossario(target_lang=None):
     return {}
 
 
+
+
+def _candidate_model_names(model_name: str):
+    names = []
+    if model_name:
+        names.append(model_name)
+        base = model_name.split("/")[-1]
+        if base not in names:
+            names.append(base)
+        if base and not base.endswith("-latest"):
+            names.append(base + "-latest")
+            names.append(f"models/{base}-latest")
+        if model_name.startswith("models/") and not model_name.endswith("-latest"):
+            names.append(model_name + "-latest")
+    names.extend(["models/gemini-1.5-flash", "gemini-1.5-flash"])
+    seen = []
+    for name in names:
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def get_gemini_model(model_name: str):
+    last_error = None
+    for candidate in _candidate_model_names(model_name):
+        try:
+            return genai.GenerativeModel(candidate)
+        except GoogleNotFound as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("Nao foi possivel instanciar o modelo Gemini.")
+
 class GeminiService(TranslationService):
     def translate(self, text, config):
         target_lang = (config.get("target_lang") or "pt").lower()
@@ -34,7 +70,7 @@ class GeminiService(TranslationService):
         source_label = config.get("source_label", "English")
 
         genai.configure(api_key=config.get("api_key"))
-        model = genai.GenerativeModel(config.get("model", "models/gemini-1.5-flash-latest"))
+        model = get_gemini_model(config.get("model", "gemini-1.5-flash"))
 
         # Only reuse glossary when translating to Brazilian Portuguese.
         glossary = carregar_glossario(target_lang if target_lang == "pt" else None)
@@ -132,3 +168,6 @@ def translate_text(servico_escolhido, texto, config):
                 return "ERRO: Nao foi possivel conectar ao servidor local do Ollama. Verifique se ele esta rodando."
             return f"ERRO na API ({servico_escolhido}): {exc}"
     return f"Servico '{servico_escolhido}' nao reconhecido."
+
+
+__all__ = ["AVAILABLE_SERVICES", "translate_text", "get_gemini_model"]
