@@ -24,7 +24,7 @@ Requirements:
 Clone the repository and set up a virtual environment:
 
 ```powershell
-git clone https://github.com/<your-user>/Game-XML-Translator.git
+git clone https://github.com/StarzynhoBR/Game-XML-Translator.git
 cd Game-XML-Translator
 python -m venv .venv
 .venv\Scripts\activate
@@ -76,12 +76,16 @@ If you need to distribute the executable, prefer creating a GitHub Release inste
 
 - **Module not found / customtkinter**: ensure the virtual environment is activated and dependencies are installed.
 - **Large executable**: this is expected for `--onefile`. Switch to `--standalone` for a folder-based build.
-- **Build failures on Windows**: install the “Desktop development with C++” workload from Visual Studio Build Tools.
+- **Build failures on Windows**: install the "Desktop development with C++" workload from Visual Studio Build Tools.
 - **Locale not loading**: verify the JSON filename matches the locale code (e.g., `pt_BR.json`) and contains valid JSON.
 
 ## Short Summary in Portuguese
 
 Game XML Translator e uma ferramenta desktop para traduzir arquivos XML de jogos. O projeto inclui interface em CustomTkinter, suporte a servicos de traducao automatica, glossario personalizavel e scripts para gerar um executavel standalone com Nuitka. Veja `BUILD.md` para passos detalhados de compilacao.
+
+## Author
+
+Created by [StarzynhoBR](https://github.com/StarzynhoBR). Se voce reutilizar alguma parte deste projeto, mantenha os creditos.
 
 ## Contributing
 
@@ -89,4 +93,4 @@ Bug reports and pull requests are welcome! Please open an issue first to discuss
 
 ## License
 
-A license has not been published for this repository, so the project remains All Rights Reserved. If you plan to reuse or redistribute the code, please add your own license file or contact the maintainer before doing so.
+See `LICENSE`. All rights reserved; contact the author for reuse permissions.
