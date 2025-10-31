@@ -12,13 +12,15 @@ from core.injetor import injetar_traducoes
 from core.i18n import I18nManager
 
 def resource_path(relative_path):
-    """ Obtém o caminho absoluto para o recurso, funciona para dev e para PyInstaller """
-    try:
-        # PyInstaller cria uma pasta temp e armazena o caminho em _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        # Se não estiver rodando como .exe, pega o caminho do projeto
-        base_path = os.path.abspath(".")
+    """Resolve paths for bundled data in script and frozen modes."""
+    base_path = getattr(sys, "_MEIPASS", None)  # PyInstaller
+    if base_path:
+        return os.path.join(base_path, relative_path)
+
+    if getattr(sys, "frozen", False):  # Nuitka, cx_Freeze, etc.
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
 
     return os.path.join(base_path, relative_path)
 
