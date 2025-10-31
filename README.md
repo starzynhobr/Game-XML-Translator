@@ -2,6 +2,8 @@
 
 Desktop tool that helps modders and localization teams translate XML dialogue files. It provides a CustomTkinter interface to preview original strings, apply machine translations, review them faster, and export an updated XML without breaking the structure of the game file.
 
+> **Status:** maintenance mode. No new features are planned, but the existing code and build instructions remain available for reference.
+
 ## Features
 
 - XML extractor/injector that preserves node order and attributes.
@@ -63,12 +65,12 @@ If you need to distribute the executable, prefer creating a GitHub Release inste
 
 ## Project Layout
 
-- `main.py` – GUI entry point with translation workflow.
-- `core/` – XML extraction/injection logic, translation service adapters, and i18n manager.
-- `locales/` – UI translations in JSON.
-- `assets/` – Static assets such as the application icon.
-- `scripts/` – Glossary JSON and additional helpers.
-- `build_nuitka.bat` – Automated Nuitka build script.
+- `main.py` - GUI entry point with translation workflow.
+- `core/` - XML extraction/injection logic, translation service adapters, and i18n manager.
+- `locales/` - UI translations in JSON.
+- `assets/` - Static assets such as the application icon.
+- `scripts/` - Glossary JSON and additional helpers.
+- `build_nuitka.bat` - Automated Nuitka build script.
 
 ## Troubleshooting
 
@@ -87,4 +89,4 @@ Bug reports and pull requests are welcome! Please open an issue first to discuss
 
 ## License
 
-Project license has not been defined yet. Add a `LICENSE` file or update this section once you choose one.
+A license has not been published for this repository, so the project remains All Rights Reserved. If you plan to reuse or redistribute the code, please add your own license file or contact the maintainer before doing so.
