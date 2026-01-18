@@ -100,10 +100,15 @@ Created by [StarzynhoBR](https://github.com/StarzynhoBR). Se voce reutilizar alg
 
 Bug reports and pull requests are welcome! Please open an issue first to discuss major changes. For pull requests, run the application locally to verify that locale files and glossary loading still work.
 
-## License
+## ⚖️ Licensing (Dual Licensing)
 
-See `LICENSE`. All rights reserved; contact the author for reuse permissions.
+This project is available under two distinct licenses:
 
+1. **Community Use (GPLv3):** Free for personal use and open-source projects. You are free to modify and distribute this software, provided that your changes remain open-source.
+
+2. **Commercial Use:** For companies wishing to integrate this translation system or its processing logic into proprietary software, OEM distributions, or commercial interfaces.
+
+To acquire a commercial license, please contact: [starzynhobr@gmail.com]
 
 ### Gemini API Tips
 - When using the free tier, prefer models like "Gemini 2.0 Flash" or other flash variants; preview/pro models (e.g., 2.5 Pro) may have zero free quota and return 429 errors.
