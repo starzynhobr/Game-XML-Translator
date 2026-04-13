@@ -111,4 +111,4 @@ This project is available under two distinct licenses:
 To acquire a commercial license, please contact: [starzynhobr@gmail.com]
 
 ### Gemini API Tips
-- When using the free tier, prefer models like "Gemini 2.0 Flash" or other flash variants; preview/pro models (e.g., 2.5 Pro) may have zero free quota and return 429 errors.
+- When using the free tier, prefer models like "Gemini 2.0 Flash", "Gemini Flash (latest)" or other flash variants; preview/pro models (e.g., 2.5 Pro) may have zero free quota and return 429 errors.
