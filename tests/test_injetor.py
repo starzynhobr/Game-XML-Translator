@@ -3,7 +3,7 @@ import os
 import pytest
 from lxml import etree
 
-from core.extrator import extrair_textos
+from core.extrator import extrair_entradas, extrair_textos
 from core.injetor import injetar_traducoes
 
 FIXTURE_XML = os.path.join(os.path.dirname(__file__), "fixtures", "sample.xml")
@@ -68,3 +68,28 @@ class TestInjetarTraducoes:
         injetar_traducoes(FIXTURE_XML, dados, output_xml)
         # If invalid XML this will raise
         etree.parse(output_xml)
+
+    def test_namespaced_round_trip_changes_only_target_tag(self, tmp_path):
+        source = tmp_path / "namespaced.xml"
+        source.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<data xmlns="urn:game">
+  <item><name>WHIPLASH</name><bio>Gifted technician.</bio></item>
+</data>
+""",
+            encoding="utf-8",
+        )
+        sucesso, entries = extrair_entradas(str(source), "item", ["bio"], ["name"])
+        assert sucesso is True
+        output = tmp_path / "translated.xml"
+
+        result = injetar_traducoes(
+            str(source),
+            {entries[0].xpath: "Técnico talentoso."},
+            str(output),
+        )
+
+        assert result is True
+        root = etree.parse(str(output)).getroot()
+        assert root.xpath("string(//*[local-name()='name'])") == "WHIPLASH"
+        assert root.xpath("string(//*[local-name()='bio'])") == "Técnico talentoso."

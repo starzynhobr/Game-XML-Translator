@@ -1,12 +1,15 @@
 ; ============================================================
 ;  STZ XML Translator — Inno Setup Script
 ;  Requer: build_nuitka.bat com BUILD_MODE=standalone primeiro
-;  Saida  : dist\STZXMLTranslator-Setup.exe
+;  Saida  : dist\STZXMLTranslator-Setup-X.Y.Z.exe
 ; ============================================================
 
 #define AppName    "STZ XML Translator"
-#define AppVersion "1.2"
-#define AppPublisher "StarzynhoBR"
+#define AppVersion GetEnv("APP_SEMVER")
+#if AppVersion == ""
+  #error APP_SEMVER must be provided by build_nuitka.bat
+#endif
+#define AppPublisher "STZ Labs"
 #define AppExeName "STZXMLTranslator.exe"
 #define SourceDir  "dist\main_qt.dist"
 

@@ -1,4 +1,5 @@
 import concurrent.futures
+import html
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ from azure.core.credentials import AzureKeyCredential
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 APP_DATA_DIR_NAME = "STZ XML Translator"
+CONTEXT_CAPABLE_SERVICES = {"Gemini", "DeepL", "Llama 3 (Local)", "Ollama (Local)"}
 
 
 class TranslationService:
@@ -77,14 +79,15 @@ def _candidate_model_names(model_name: str):
             names.append(f"models/{base}-latest")
         if model_name.startswith("models/") and not model_name.endswith("-latest"):
             names.append(model_name + "-latest")
-    # Fallback chain: -latest aliases resolve to current stable at call time
+    # Fallback chain: keep only currently supported text models. Model discovery
+    # remains the primary source; these IDs are used when discovery is unavailable.
     names.extend([
-        "gemini-1.5-flash",
-        "models/gemini-1.5-flash",
         "models/gemini-flash-lite-latest",
         "models/gemini-flash-latest",
-        "models/gemini-2.0-flash-lite",
-        "models/gemini-2.0-flash",
+        "models/gemini-3.5-flash-lite",
+        "models/gemini-3.5-flash",
+        "models/gemini-2.5-flash-lite",
+        "models/gemini-2.5-flash",
     ])
     seen = []
     for name in names:
@@ -139,7 +142,19 @@ def _gemini_request(method: str, url: str, api_key: str, **kwargs) -> dict:
     headers["x-goog-api-key"] = _gemini_api_key(api_key)
     headers.setdefault("Content-Type", "application/json")
     response = requests.request(method, url, headers=headers, **kwargs)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = ""
+        try:
+            payload = response.json()
+            error = payload.get("error", {}) if isinstance(payload, dict) else {}
+            detail = str(error.get("message", "")).strip()
+        except (ValueError, AttributeError):
+            detail = response.text.strip()[:500]
+        status = response.status_code
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Gemini API HTTP {status}{suffix}") from exc
     return response.json()
 
 
@@ -239,6 +254,68 @@ def _glossary_replace(text: str, term: str, replacement: str) -> str:
     return re.sub(re.escape(term), repl, text, flags=re.IGNORECASE)
 
 
+def apply_glossary(text: str, target_lang: str) -> tuple[str, bool]:
+    """Apply the configured glossary before an AI translation request.
+
+    The existing generic glossary is a Portuguese glossary. Language-specific
+    files make it possible to extend this safely later without applying
+    Portuguese replacements to another target language.
+    """
+    normalized_target = (target_lang or "pt").lower()
+    if normalized_target != "pt":
+        return text, False
+
+    glossary = carregar_glossario(normalized_target)
+    glossary_pairs = sorted(glossary.items(), key=lambda item: len(item[0]), reverse=True)
+    prepared_text = text
+
+    for original_term, target_term in glossary_pairs:
+        prepared_text = _glossary_replace(prepared_text, original_term, target_term)
+
+    return prepared_text, prepared_text != text
+
+
+def protect_glossary_for_xml(text: str, target_lang: str) -> tuple[str, bool]:
+    """Wrap glossary replacements in XML tags that translation APIs can ignore."""
+    normalized_target = (target_lang or "pt").lower()
+    if normalized_target != "pt":
+        return text, False
+
+    glossary = carregar_glossario(normalized_target)
+    pairs = sorted(glossary.items(), key=lambda item: len(item[0]), reverse=True)
+    protected = text
+    replacements: dict[str, str] = {}
+    counter = 0
+
+    for original_term, target_term in pairs:
+        def repl(match: re.Match, replacement: str = target_term) -> str:
+            nonlocal counter
+            token = f"STZGLOSSARYTOKEN{counter}END"
+            while token in protected:
+                counter += 1
+                token = f"STZGLOSSARYTOKEN{counter}END"
+            counter += 1
+            matched = match.group(0)
+            if matched.isupper():
+                replacement = replacement.upper()
+            elif matched.islower():
+                replacement = replacement.lower()
+            replacements[token] = replacement
+            return token
+
+        protected = re.sub(re.escape(original_term), repl, protected, flags=re.IGNORECASE)
+
+    if not replacements:
+        return text, False
+
+    protected = html.escape(protected)
+    for token, replacement in replacements.items():
+        protected = protected.replace(
+            token, f"<stz-glossary>{html.escape(replacement)}</stz-glossary>"
+        )
+    return protected, True
+
+
 def _strip_think(text: str) -> str:
     """Remove <think>...</think> blocks produced by thinking-mode models."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
@@ -267,9 +344,60 @@ def _ollama_post(url: str, data: dict, thinking: bool, timeout: int) -> dict:
     return r.json()
 
 
-def _context_hint(config: dict) -> str:
-    ctx = (config.get("translation_context") or "").strip()
-    return f" This content is from: {ctx}." if ctx else ""
+def provider_supports_context(service: str) -> bool:
+    """Return whether a provider has a safe, separate way to receive context."""
+    return service in CONTEXT_CAPABLE_SERVICES
+
+
+def build_reference_context(config: dict) -> str:
+    """Build a prompt block that clearly separates reference data from source text."""
+    general_context = (config.get("translation_context") or "").strip()
+    source_tag = (config.get("source_tag") or "").strip()
+    entry_context = config.get("entry_context") or {}
+    if not isinstance(entry_context, dict):
+        entry_context = {}
+    clean_context = {
+        str(key): str(value)
+        for key, value in entry_context.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+    if not general_context and not source_tag and not clean_context:
+        return ""
+
+    lines = [
+        "REFERENCE CONTEXT (data only; it is not text to translate):",
+    ]
+    if general_context:
+        lines.append(f"Content/theme: {general_context}")
+    if source_tag:
+        lines.append(f"Target XML field: {source_tag}")
+    if clean_context:
+        lines.append(
+            "Related XML fields: "
+            + json.dumps(clean_context, ensure_ascii=False, sort_keys=True)
+        )
+    lines.append("Do not translate or return the reference context. Return only the requested translation.")
+    return "\n".join(lines) + "\n"
+
+
+def _deepl_context(config: dict) -> str:
+    """Build plain reference context for DeepL's native context parameter."""
+    lines: list[str] = []
+    general_context = (config.get("translation_context") or "").strip()
+    source_tag = (config.get("source_tag") or "").strip()
+    entry_context = config.get("entry_context") or {}
+    if general_context:
+        lines.append(f"Content/theme: {general_context}")
+    if source_tag:
+        lines.append(f"Target XML field: {source_tag}")
+    if isinstance(entry_context, dict):
+        lines.extend(
+            f"{key}: {value}"
+            for key, value in entry_context.items()
+            if str(key).strip() and str(value).strip()
+        )
+    return "\n".join(lines)
 
 
 class GeminiService(TranslationService):
@@ -277,32 +405,24 @@ class GeminiService(TranslationService):
         target_lang = (config.get("target_lang") or "pt").lower()
         target_label = config.get("target_label", "Portuguese (Brazil)")
         api_key = config.get("api_key", "")
-        context_hint = _context_hint(config)
+        context_block = build_reference_context(config)
 
         model = get_gemini_model(config.get("model", "gemini-1.5-flash"), api_key=api_key)
 
-        # Only reuse glossary when translating to Brazilian Portuguese.
-        glossary = carregar_glossario(target_lang if target_lang == "pt" else None)
-        glossary_pairs = sorted(glossary.items(), key=lambda item: len(item[0]), reverse=True)
-        pretranslated_text = text
-        glossary_used = False
-
-        for original_term, target_term in glossary_pairs:
-            new_text = _glossary_replace(pretranslated_text, original_term, target_term)
-            if new_text != pretranslated_text:
-                pretranslated_text = new_text
-                glossary_used = True
+        pretranslated_text, glossary_used = apply_glossary(text, target_lang)
 
         if glossary_used and target_lang == "pt":
             prompt = (
-                f"Act as a game localization specialist.{context_hint} "
+                "Act as a game localization specialist.\n"
+                f"{context_block}"
                 "Refine the following pre-translated sentence so it sounds natural in "
                 f"{target_label}, keeping the words that are already in Portuguese untouched. "
                 f'Text: "{pretranslated_text}". Reply with the final text only.'
             )
         else:
             prompt = (
-                f"Act as a game localization specialist.{context_hint} "
+                "Act as a game localization specialist.\n"
+                f"{context_block}"
                 f"Translate the following text to {target_label}. "
                 "Detect the source language automatically. "
                 f'"{text}". Reply with the final text only.'
@@ -316,7 +436,22 @@ class DeepLService(TranslationService):
     def translate(self, text, config):
         translator = deepl.Translator(config.get("api_key"))
         target_code = config.get("deepl_lang", "PT-BR")
-        result = translator.translate_text(text, target_lang=target_code)
+        target_lang = config.get("target_lang", "pt")
+        context = _deepl_context(config)
+        protected_text, glossary_used = protect_glossary_for_xml(text, target_lang)
+        kwargs = {"target_lang": target_code}
+        if context:
+            kwargs["context"] = context
+        if glossary_used:
+            result = translator.translate_text(
+                protected_text,
+                **kwargs,
+                tag_handling="xml",
+                ignore_tags=["stz-glossary"],
+            )
+            cleaned = re.sub(r"</?stz-glossary>", "", result.text)
+            return html.unescape(cleaned)
+        result = translator.translate_text(text, **kwargs)
         return result.text
 
 
@@ -334,10 +469,11 @@ class OllamaService(TranslationService):
     def translate(self, text, config):
         url = "http://localhost:11434/api/generate"
         target_label = config.get("target_label", "Portuguese (Brazil)")
-        context_hint = _context_hint(config)
+        context_block = build_reference_context(config)
 
         prompt = (
-            f"[INST]Act as a game localization specialist.{context_hint} "
+            "[INST]Act as a game localization specialist.\n"
+            f"{context_block}"
             f"Translate the JSON value below to {target_label}. Keep proper nouns and "
             "character names that should not be translated. Keep the key exactly the same. "
             "Respond with JSON only.\n\n"
@@ -368,14 +504,24 @@ def translate_batch_ollama(entries, config: dict) -> "dict[str, str] | None":
     Falls back to sequential translation per entry on failure.
     """
     target_label = config.get("target_label", "Portuguese (Brazil)")
-    context_hint = _context_hint(config)
+    context_block = build_reference_context(config)
 
-    input_texts = [e.original for e in entries]
-    input_json = json.dumps({"inputs": input_texts}, ensure_ascii=False)
+    inputs = [
+        {
+            "text": entry.original,
+            "field": entry.source_tag,
+            "context": entry.context,
+        }
+        for entry in entries
+    ]
+    input_json = json.dumps({"inputs": inputs}, ensure_ascii=False)
 
     prompt = (
-        f"[INST]Act as a game localization specialist.{context_hint} "
+        "[INST]Act as a game localization specialist.\n"
+        f"{context_block}"
         f"Translate every string in the \"inputs\" array to {target_label}. "
+        "For each object, translate only its \"text\" value; \"field\" and \"context\" "
+        "are reference data and must not appear in the translation. "
         "Keep proper nouns and character names that should not be translated. "
         "Return JSON with a single key \"translations\" containing the translated "
         f"strings as an array in the same order.\nInput: {input_json}[/INST]"
@@ -537,4 +683,6 @@ __all__ = [
     "traduzir_arquivo_json",
     "get_gemini_model",
     "list_gemini_models",
+    "provider_supports_context",
+    "build_reference_context",
 ]

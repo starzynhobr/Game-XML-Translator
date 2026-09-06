@@ -6,10 +6,17 @@ import pytest
 
 from core.tradutor_api import (
     AVAILABLE_SERVICES,
+    DeepLService,
     GeminiService,
+    OllamaService,
     _candidate_model_names,
+    _gemini_request,
+    apply_glossary,
     carregar_glossario,
+    protect_glossary_for_xml,
+    provider_supports_context,
     traduzir_arquivo_json,
+    translate_batch_ollama,
     translate_text,
 )
 
@@ -54,7 +61,10 @@ class TestCandidateModelNames:
 
     def test_includes_fallback_models(self):
         candidates = _candidate_model_names("some-weird-model")
-        assert "gemini-1.5-flash" in candidates
+        assert "models/gemini-3.5-flash-lite" in candidates
+        assert "models/gemini-2.5-flash" in candidates
+        assert "gemini-1.5-flash" not in candidates
+        assert "models/gemini-2.0-flash" not in candidates
 
     def test_no_duplicates(self):
         candidates = _candidate_model_names("gemini-1.5-flash")
@@ -62,8 +72,101 @@ class TestCandidateModelNames:
 
     def test_empty_string_returns_fallbacks(self):
         candidates = _candidate_model_names("")
-        assert "gemini-1.5-flash" in candidates
+        assert "models/gemini-3.5-flash-lite" in candidates
         assert len(candidates) >= 1
+
+
+class TestApplyGlossary:
+    def test_applies_portuguese_glossary(self, tmp_path, monkeypatch):
+        (tmp_path / "glossario_pt.json").write_text(
+            json.dumps({"Sword": "Espada"}), encoding="utf-8"
+        )
+        monkeypatch.setenv("STZ_XML_TRANSLATOR_DATA_DIR", str(tmp_path))
+
+        text, used = apply_glossary("The Sword is ready", "pt")
+
+        assert text == "The Espada is ready"
+        assert used is True
+
+    def test_does_not_apply_portuguese_glossary_to_other_targets(self, tmp_path, monkeypatch):
+        (tmp_path / "glossario.json").write_text(
+            json.dumps({"Sword": "Espada"}), encoding="utf-8"
+        )
+        monkeypatch.setenv("STZ_XML_TRANSLATOR_DATA_DIR", str(tmp_path))
+
+        text, used = apply_glossary("The Sword is ready", "en")
+
+        assert text == "The Sword is ready"
+        assert used is False
+
+    def test_protects_glossary_terms_for_xml_translation(self, tmp_path, monkeypatch):
+        (tmp_path / "glossario_pt.json").write_text(
+            json.dumps({"Sword": "Espada"}), encoding="utf-8"
+        )
+        monkeypatch.setenv("STZ_XML_TRANSLATOR_DATA_DIR", str(tmp_path))
+
+        text, used = protect_glossary_for_xml("Sword & shield", "pt")
+
+        assert text == "<stz-glossary>Espada</stz-glossary> &amp; shield"
+        assert used is True
+
+
+class TestDeepLGlossary:
+    def test_preserves_glossary_terms_with_ignored_xml_tag(self, tmp_path, monkeypatch):
+        (tmp_path / "glossario_pt.json").write_text(
+            json.dumps({"Sword": "Espada"}), encoding="utf-8"
+        )
+        monkeypatch.setenv("STZ_XML_TRANSLATOR_DATA_DIR", str(tmp_path))
+        translator = MagicMock()
+        translator.translate_text.return_value.text = (
+            "A <stz-glossary>ESPADA</stz-glossary> &amp; o escudo"
+        )
+
+        with patch("core.tradutor_api.deepl.Translator", return_value=translator):
+            result = DeepLService().translate(
+                "The Sword & shield",
+                {"api_key": "fake", "target_lang": "pt", "deepl_lang": "PT-BR"},
+            )
+
+        sent_text = translator.translate_text.call_args.args[0]
+        assert "<stz-glossary>Espada</stz-glossary>" in sent_text
+        assert translator.translate_text.call_args.kwargs["tag_handling"] == "xml"
+        assert translator.translate_text.call_args.kwargs["ignore_tags"] == ["stz-glossary"]
+        assert result == "A ESPADA & o escudo"
+
+    def test_sends_entry_context_through_native_context_parameter(self):
+        translator = MagicMock()
+        translator.translate_text.return_value.text = "Técnico talentoso."
+
+        with patch("core.tradutor_api.deepl.Translator", return_value=translator):
+            result = DeepLService().translate(
+                "Gifted technician.",
+                {
+                    "api_key": "fake",
+                    "target_lang": "pt",
+                    "deepl_lang": "PT-BR",
+                    "source_tag": "bio",
+                    "entry_context": {"dispName": "WHIPLASH"},
+                },
+            )
+
+        assert translator.translate_text.call_args.args[0] == "Gifted technician."
+        sent_context = translator.translate_text.call_args.kwargs["context"]
+        assert "dispName: WHIPLASH" in sent_context
+        assert "bio" in sent_context
+        assert result == "Técnico talentoso."
+
+
+class TestGeminiErrors:
+    def test_http_error_includes_api_message(self):
+        response = MagicMock()
+        response.status_code = 429
+        response.json.return_value = {"error": {"message": "Quota exceeded"}}
+        response.raise_for_status.side_effect = __import__("requests").HTTPError("429")
+
+        with patch("core.tradutor_api.requests.request", return_value=response):
+            with pytest.raises(RuntimeError, match="Gemini API HTTP 429: Quota exceeded"):
+                _gemini_request("GET", "https://example.invalid", "fake")
 
 
 class TestTranslateText:
@@ -102,6 +205,84 @@ class TestTranslateText:
         assert "Detect the source language automatically" in prompt
         assert "from English to English" not in prompt
         assert result == "Radiation"
+
+    def test_gemini_prompt_delimits_entry_context_as_reference_only(self):
+        model = MagicMock()
+        model.generate_content.return_value.text = "Técnico talentoso."
+
+        with patch("core.tradutor_api.get_gemini_model", return_value=model):
+            GeminiService().translate(
+                "Gifted technician.",
+                {
+                    "api_key": "fake",
+                    "model": "gemini-test",
+                    "target_label": "Portuguese (Brazil)",
+                    "source_tag": "bio",
+                    "entry_context": {"dispName": "WHIPLASH"},
+                },
+            )
+
+        prompt = model.generate_content.call_args.args[0]
+        assert "REFERENCE CONTEXT" in prompt
+        assert '"dispName": "WHIPLASH"' in prompt
+        assert "Do not translate or return the reference context" in prompt
+
+    def test_ollama_prompt_contains_structured_entry_context(self):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"response": '{"text":"Técnico talentoso."}'}
+
+        with patch("core.tradutor_api.requests.post", return_value=response) as post:
+            result = OllamaService().translate(
+                "Gifted technician.",
+                {
+                    "model": "llama3",
+                    "target_label": "Portuguese (Brazil)",
+                    "source_tag": "bio",
+                    "entry_context": {"dispName": "WHIPLASH"},
+                },
+            )
+
+        sent_prompt = post.call_args.kwargs["json"]["prompt"]
+        assert "REFERENCE CONTEXT" in sent_prompt
+        assert '"dispName": "WHIPLASH"' in sent_prompt
+        assert result == "Técnico talentoso."
+
+    @pytest.mark.parametrize(
+        "provider,expected",
+        [
+            ("Gemini", True),
+            ("DeepL", True),
+            ("Ollama (Local)", True),
+            ("Google Translate (Free)", False),
+            ("Microsoft Azure", False),
+        ],
+    )
+    def test_provider_context_capability(self, provider, expected):
+        assert provider_supports_context(provider) is expected
+
+    def test_ollama_batch_keeps_context_separate_from_translatable_text(self):
+        entries = [
+            MagicMock(
+                xpath="/root/item[1]/bio[1]",
+                original="Gifted technician.",
+                source_tag="bio",
+                context={"dispName": "WHIPLASH"},
+            )
+        ]
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"response": '{"translations":["Técnico talentoso."]}'}
+
+        with patch("core.tradutor_api.requests.post", return_value=response) as post:
+            result = translate_batch_ollama(entries, {"model": "llama3"})
+
+        prompt = post.call_args.kwargs["json"]["prompt"]
+        assert '"text": "Gifted technician."' in prompt
+        assert '"field": "bio"' in prompt
+        assert '"context": {"dispName": "WHIPLASH"}' in prompt
+        assert "reference data and must not appear" in prompt
+        assert result == {"/root/item[1]/bio[1]": "Técnico talentoso."}
 
     def test_api_exception_returns_error_string(self):
         mock_service = MagicMock()

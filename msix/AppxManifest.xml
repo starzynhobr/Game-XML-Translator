@@ -3,7 +3,7 @@
   AppxManifest.xml — Template para MSIX do STZ XML Translator
   Placeholders substituídos por build-msix.ps1:
     {{AppId}}               ex: STZXMLTranslator
-    {{Version}}             ex: 1.2.0.0
+    {{Version}}             ex: 1.4.0.0
     {{PublisherCN}}         ex: CN=STZ Labs
     {{PublisherDisplayName}} ex: STZ Labs
     {{AppName}}             ex: STZ XML Translator

@@ -7,7 +7,8 @@ REM  Apenas flags dinamicas ficam aqui.
 REM ============================================================
 
 REM --- Versao (fonte unica: altere aqui para um novo release) ---
-set APP_VERSION=1.2.0.0
+set APP_VERSION=1.4.0.0
+for /f "tokens=1-3 delims=." %%a in ("%APP_VERSION%") do set APP_SEMVER=%%a.%%b.%%c
 
 REM --- UPX pos-build ---
 REM   1 = comprime com UPX (40-60%% menor; aumenta falsos positivos em AV)
@@ -15,9 +16,9 @@ REM   0 = sem UPX
 set USE_UPX=0
 
 REM --- Installer via Inno Setup ---
-REM   1 = gera STZXMLTranslator-Setup.exe
-REM   0 = sem installer (usar MSIX via build-msix.ps1)
-set BUILD_INSTALLER=0
+REM   1 = gera STZXMLTranslator-Setup-X.Y.Z.exe
+REM   0 = gera apenas a pasta standalone
+set BUILD_INSTALLER=1
 
 REM --- Relatorio de compilacao ---
 REM   1 = gera compilation-report.xml (mostra tudo incluido no bundle)
@@ -93,6 +94,10 @@ REM Relatorio
 set REPORT_PARAM=
 if "%BUILD_REPORT%"=="1" set REPORT_PARAM=--report=compilation-report.xml
 
+REM Embute a versao canonica no runtime compilado. Necessario porque o Nuitka
+REM nao expoe de forma confiavel os recursos de versao do executavel ao Python.
+> "core\_build_version.py" echo BUILD_VERSION = "%APP_VERSION%"
+
 REM Flags estaticas carregadas dos comentarios # nuitka-project: em main_qt.py
 python -m nuitka ^
     --jobs=%NUMBER_OF_PROCESSORS% ^
@@ -129,23 +134,21 @@ if "%USE_UPX%"=="1" (
 )
 
 REM --- Installer via Inno Setup (so no modo standalone) ---
+set "ISCC_EXE="
+if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC_EXE if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC_EXE if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+
 if "%BUILD_INSTALLER%"=="1" (
     if not "%BUILD_MODE%"=="standalone" (
         echo Aviso: BUILD_INSTALLER=1 requer BUILD_MODE=standalone. Pulando installer.
     ) else (
         echo.
         echo Gerando installer com Inno Setup...
-        if exist "C:\Program Files ^(x86^)\Inno Setup 6\ISCC.exe" (
-            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        if defined ISCC_EXE (
+            "%ISCC_EXE%" installer.iss
             if not errorlevel 1 (
-                echo Installer gerado: dist\STZXMLTranslator-Setup.exe
-            ) else (
-                echo Erro ao gerar installer.
-            )
-        ) else if exist "C:\Program Files\Inno Setup 6\ISCC.exe" (
-            "C:\Program Files\Inno Setup 6\ISCC.exe" installer.iss
-            if not errorlevel 1 (
-                echo Installer gerado: dist\STZXMLTranslator-Setup.exe
+                echo Installer gerado: dist\STZXMLTranslator-Setup-%APP_SEMVER%.exe
             ) else (
                 echo Erro ao gerar installer.
             )

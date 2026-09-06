@@ -3,17 +3,23 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from threading import RLock
 
+from core.extrator import ExtractedEntry, XmlDocumentIndex, indexar_xml
 from core.project import TranslationProject
 from core.translation_worker import TranslationWorker
 
 TRANSLATION_TARGETS: dict[str, dict[str, str]] = {
-    "pt": {"code": "pt", "deepl": "PT-BR", "label": "Portuguese (Brazil)"},
-    "en": {"code": "en", "deepl": "EN-US", "label": "English"},
-    "es": {"code": "es", "deepl": "ES", "label": "Spanish"},
-    "fr": {"code": "fr", "deepl": "FR", "label": "French"},
-    "ja": {"code": "ja", "deepl": "JA", "label": "Japanese"},
+    "pt": {"code": "pt", "deepl": "PT-BR", "label": "Portuguese (Brazil)", "display": "Português (Brasil)", "locale": "pt_BR"},
+    "en": {"code": "en", "deepl": "EN-US", "label": "English", "display": "English (US)", "locale": "en_US"},
+    "es": {"code": "es", "deepl": "ES", "label": "Spanish", "display": "Español (España)", "locale": "es_ES"},
+    "fr": {"code": "fr", "deepl": "FR", "label": "French", "display": "Français (France)", "locale": "fr_FR"},
+    "ja": {"code": "ja", "deepl": "JA", "label": "Japanese", "display": "日本語 (日本)", "locale": "ja_JP"},
+    "it": {"code": "it", "deepl": "IT", "label": "Italian", "display": "Italiano", "locale": "it_IT"},
+    "ru": {"code": "ru", "deepl": "RU", "label": "Russian", "display": "Русский", "locale": "ru_RU"},
+    "da": {"code": "da", "deepl": "DA", "label": "Danish", "display": "Dansk", "locale": "da_DK"},
+    "tr": {"code": "tr", "deepl": "TR", "label": "Turkish", "display": "Türkçe", "locale": "tr_TR"},
 }
 
 CONFIG_FILE = "config.json"
@@ -27,6 +33,55 @@ PROVIDER_URLS: dict[str, str] = {
     "Microsoft Azure": "https://portal.azure.com/#create/Microsoft.CognitiveServicesTextTranslation",
     "Ollama (Local)": "https://ollama.ai/download",
 }
+
+
+def _normalize_tag_list(value) -> list[str]:
+    """Return a stable, deduplicated list from legacy or current tag values."""
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, Sequence):
+        values = value
+    else:
+        values = []
+
+    normalized: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        tag = item.strip()
+        if tag and tag not in normalized:
+            normalized.append(tag)
+    return normalized
+
+
+def _normalize_preset(preset: dict) -> dict:
+    """Normalize a preset in memory while retaining the legacy UI field."""
+    normalized = dict(preset)
+    target_tags = _normalize_tag_list(preset.get("target_tags"))
+    if not target_tags:
+        target_tags = _normalize_tag_list(preset.get("target_tag"))
+    context_tags = _normalize_tag_list(preset.get("context_tags"))
+    normalized["target_tags"] = target_tags
+    normalized["context_tags"] = context_tags
+    normalized["target_tag"] = target_tags[0] if target_tags else ""
+    return normalized
+
+
+def _preset_for_storage(preset: dict) -> dict:
+    """Serialize presets using only the current list-based tag schema."""
+    stored = _normalize_preset(preset)
+    stored.pop("target_tag", None)
+    return stored
+
+
+def _preset_key(preset: dict) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
+    normalized = _normalize_preset(preset)
+    return (
+        str(normalized.get("label", "")),
+        str(normalized.get("parent_tag", "")),
+        tuple(normalized["target_tags"]),
+        tuple(normalized["context_tags"]),
+    )
 
 
 def resource_path(relative_path: str) -> str:
@@ -108,6 +163,8 @@ class AppController:
     def __init__(self) -> None:
         self.project = TranslationProject()
         self._worker: TranslationWorker | None = None
+        self._xml_index: XmlDocumentIndex | None = None
+        self._xml_index_lock = RLock()
         self.source_language_label = "English"
 
         # Config state
@@ -126,6 +183,9 @@ class AppController:
         self.translation_target: dict[str, str] = TRANSLATION_TARGETS["pt"].copy()
         self.game_folder: str = ""
         self.preferred_theme: str = "Windows Fluent"
+        self.preferred_ui_mode: str = "classic"
+        self.last_update_check: float = 0.0
+        self.skipped_update_version: str = ""
 
         self._load_config()
 
@@ -160,6 +220,13 @@ class AppController:
             self.api_key = self._api_keys.get(self.preferred_provider, "")
             self.game_folder = data.get("game_folder", "")
             self.preferred_theme = data.get("theme", "Windows Fluent")
+            ui_mode = data.get("ui_mode", "classic")
+            self.preferred_ui_mode = ui_mode if ui_mode in {"classic", "modern"} else "classic"
+            try:
+                self.last_update_check = float(data.get("last_update_check", 0.0))
+            except (TypeError, ValueError):
+                self.last_update_check = 0.0
+            self.skipped_update_version = str(data.get("skipped_update_version", ""))
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -193,6 +260,9 @@ class AppController:
             "api_keys": {k: v for k, v in self._api_keys.items() if v},
             "game_folder": self.game_folder,
             "theme": self.preferred_theme,
+            "ui_mode": self.preferred_ui_mode,
+            "last_update_check": self.last_update_check,
+            "skipped_update_version": self.skipped_update_version,
         }
         try:
             os.makedirs(user_data_dir(), exist_ok=True)
@@ -223,6 +293,34 @@ class AppController:
     def save_preferred_theme(self, theme_name: str) -> None:
         """Persist the selected UI theme."""
         self.preferred_theme = theme_name
+        self.save_config(
+            api_key=self.api_key,
+            model_label=self.preferred_model_label,
+            model_id=self.preferred_model_id,
+        )
+
+    def save_preferred_ui_mode(self, ui_mode: str) -> None:
+        """Persist which QML shell should be loaded on the next launch."""
+        if ui_mode not in {"classic", "modern"}:
+            return
+        self.preferred_ui_mode = ui_mode
+        self.save_config(
+            api_key=self.api_key,
+            model_label=self.preferred_model_label,
+            model_id=self.preferred_model_id,
+        )
+
+    def save_update_preferences(
+        self,
+        *,
+        last_check: float | None = None,
+        skipped_version: str | None = None,
+    ) -> None:
+        """Persist updater scheduling without overwriting the rest of the config."""
+        if last_check is not None:
+            self.last_update_check = last_check
+        if skipped_version is not None:
+            self.skipped_update_version = skipped_version
         self.save_config(
             api_key=self.api_key,
             model_label=self.preferred_model_label,
@@ -287,6 +385,23 @@ class AppController:
     # XML tag introspection
     # ------------------------------------------------------------------
 
+    def _get_xml_index(self, xml_path: str) -> tuple[bool, XmlDocumentIndex | str]:
+        """Return the current document index, rebuilding it only when the file changed."""
+        with self._xml_index_lock:
+            if self._xml_index and self._xml_index.matches_file(xml_path):
+                return True, self._xml_index
+            success, result = indexar_xml(xml_path)
+            if success and isinstance(result, XmlDocumentIndex):
+                self._xml_index = result
+            return success, result
+
+    def analyze_xml(self, xml_path: str) -> tuple[bool, list[str] | str]:
+        """Prepare a reusable index and return the available parent tags."""
+        success, result = self._get_xml_index(xml_path)
+        if not success or isinstance(result, str):
+            return False, result
+        return True, list(result.parent_tags)
+
     @staticmethod
     def _strip_ns(tag: str) -> str:
         """Remove XML namespace prefix: {http://...}name → name."""
@@ -318,37 +433,8 @@ class AppController:
             </actionLevelStatuses>
           </data>
         """
-        import xml.etree.ElementTree as ET
-        from collections import Counter
-        try:
-            root = ET.parse(xml_path).getroot()
-            repeating: set[str] = set()
-
-            def _walk(element) -> None:
-                counts = Counter(self._strip_ns(c.tag) for c in element)
-                for tag, count in counts.items():
-                    if count > 1:
-                        repeating.add(tag)
-                for child in element:
-                    _walk(child)
-
-            _walk(root)
-
-            # Filter: keep only repeating tags whose occurrences contain at least
-            # one child element with non-empty text (i.e. actual leaf fields).
-            def _has_text_children(tag: str) -> bool:
-                for elem in root.iter(tag):
-                    for child in elem:
-                        if child.text and child.text.strip():
-                            return True
-                return False
-
-            result = [t for t in sorted(repeating) if _has_text_children(t)]
-            # Fallback: if the filter removes everything, return unfiltered list
-            # (better to show something than nothing).
-            return result if result else sorted(repeating)
-        except Exception:
-            return []
+        success, result = self.analyze_xml(xml_path)
+        return result if success and isinstance(result, list) else []
 
     def get_child_tags(self, xml_path: str, parent_tag: str) -> list[str]:
         """
@@ -357,31 +443,10 @@ class AppController:
 
         Prefers text-bearing children; falls back to all children if none have text.
         """
-        import xml.etree.ElementTree as ET
-        try:
-            root = ET.parse(xml_path).getroot()
-
-            # Collect child tags with actual text content across ALL occurrences.
-            text_tags: set[str] = set()
-            all_tags: list[str] = []
-            all_seen: set[str] = set()
-
-            for parent in root.iter(parent_tag):
-                for child in parent:
-                    name = self._strip_ns(child.tag)
-                    if name not in all_seen:
-                        all_seen.add(name)
-                        all_tags.append(name)
-                    if child.text and child.text.strip():
-                        text_tags.add(name)
-
-            if text_tags:
-                # Return text-bearing tags in document order.
-                return [t for t in all_tags if t in text_tags]
-            # Fallback: return all child tags (first occurrence order).
-            return all_tags
-        except Exception:
+        success, result = self._get_xml_index(xml_path)
+        if not success or isinstance(result, str):
             return []
+        return result.child_tags(parent_tag)
 
     # ------------------------------------------------------------------
     # Locale / translation target
@@ -396,6 +461,13 @@ class AppController:
 
     def set_translation_target(self, locale_code: str) -> None:
         self.translation_target = self.resolve_translation_target(locale_code)
+
+    def available_translation_targets(self) -> dict[str, str]:
+        """Return native display names and locale codes for supported targets."""
+        return {
+            meta["display"]: meta["locale"]
+            for meta in TRANSLATION_TARGETS.values()
+        }
 
     def available_locales(self) -> dict[str, str]:
         """
@@ -423,9 +495,61 @@ class AppController:
     # XML loading
     # ------------------------------------------------------------------
 
-    def load_xml(self, xml_path: str, parent_tag: str, target_tag: str) -> tuple[bool, str]:
+    def load_xml(
+        self,
+        xml_path: str,
+        parent_tag: str,
+        target_tag: str | Sequence[str],
+        context_tags: Sequence[str] = (),
+    ) -> tuple[bool, str]:
         """Load XML into the project. Returns (success, error_message)."""
-        return self.project.load(xml_path, parent_tag, target_tag)
+        target_tags = [target_tag] if isinstance(target_tag, str) else list(target_tag)
+        success, result = self.extract_xml_entries(
+            xml_path, parent_tag, target_tags, context_tags
+        )
+        if not success or isinstance(result, str):
+            return False, result
+        self.apply_xml_entries(xml_path, parent_tag, target_tags, context_tags, result)
+        return True, ""
+
+    def extract_xml_entries(
+        self,
+        xml_path: str,
+        parent_tag: str,
+        target_tags: Sequence[str],
+        context_tags: Sequence[str] = (),
+    ) -> tuple[bool, list[ExtractedEntry] | str]:
+        """Prepare entries without mutating project state; safe to run in a worker."""
+        success, result = self._get_xml_index(xml_path)
+        if not success or isinstance(result, str):
+            return False, result
+        return result.extract_entries(parent_tag, target_tags, context_tags)
+
+    def apply_xml_entries(
+        self,
+        xml_path: str,
+        parent_tag: str,
+        target_tags: Sequence[str],
+        context_tags: Sequence[str],
+        entries: Sequence[ExtractedEntry],
+    ) -> None:
+        """Apply worker-prepared entries on the owning/UI thread."""
+        self.project.load_extracted(
+            xml_path, parent_tag, target_tags, context_tags, entries
+        )
+
+    def preview_tag_selection(
+        self,
+        xml_path: str,
+        parent_tag: str,
+        target_tags: Sequence[str],
+        context_tags: Sequence[str] = (),
+    ) -> dict[str, int]:
+        """Count the rows a tag selection would create without mutating the project."""
+        success, result = self._get_xml_index(xml_path)
+        if not success or isinstance(result, str):
+            return {"records": 0, "lines": 0}
+        return result.preview(parent_tag, target_tags, context_tags)
 
     # ------------------------------------------------------------------
     # Translation config builder
@@ -447,6 +571,11 @@ class AppController:
             "translation_context": self.translation_context,
             "ollama_thinking": self.ollama_thinking,
             "checkpoint_dir": user_data_path("checkpoints"),
+            "checkpoint_fallbacks": (
+                self.checkpoint_fallbacks_for(self.project.xml_path)
+                if self.project.xml_path
+                else []
+            ),
         }
         if i18n:
             cfg["_strings"] = {
@@ -462,6 +591,7 @@ class AppController:
                 "api_error":           i18n.get("log_api_error_prefix"),
                 "batch_count":         i18n.get("log_batch_complete"),
                 "final_done":          i18n.get("log_mass_translation_done"),
+                "context_unsupported": i18n.get("log_context_unsupported"),
             }
         return cfg
 
@@ -470,11 +600,36 @@ class AppController:
         return self.checkpoint_path_for(self.project.xml_path)
 
     def checkpoint_path_for(self, xml_path: str) -> str:
-        """Checkpoint path for an XML file using the app's writable data directory."""
+        """Checkpoint path isolated by XML, target language, and selected tags."""
         return self.project.checkpoint_path(
             xml_path,
             self.translation_target.get("code", ""),
             user_data_path("checkpoints"),
+            parent_tag=self.project.parent_tag,
+            target_tags=self.project.target_tags,
+            context_tags=self.project.context_tags,
+        )
+
+    def legacy_checkpoint_path_for(self, xml_path: str) -> str:
+        """Return the filename used before tag selections became part of the identity."""
+        return self.project.checkpoint_path(
+            xml_path,
+            self.translation_target.get("code", ""),
+            user_data_path("checkpoints"),
+        )
+
+    def checkpoint_fallbacks_for(self, xml_path: str) -> list[str]:
+        """Return legacy checkpoints in precedence order for controlled migration."""
+        fallbacks = [self.legacy_checkpoint_path_for(xml_path)]
+        if self.translation_target.get("code", "") == "pt":
+            fallbacks.append(_legacy_cwd_path("textos_traduzidos_checkpoint.json"))
+        return fallbacks
+
+    def restore_checkpoint_for(self, xml_path: str) -> int:
+        """Restore current progress, falling back to legacy data only when absent."""
+        return self.project.load_checkpoint_with_fallback(
+            self.checkpoint_path_for(xml_path),
+            self.checkpoint_fallbacks_for(xml_path),
         )
 
     # ------------------------------------------------------------------
@@ -506,11 +661,15 @@ class AppController:
         translations to pending/empty. Returns the number of entries reset.
         """
         if self.project.xml_path:
-            checkpoint = self.current_checkpoint_path()
-            try:
-                os.remove(checkpoint)
-            except (FileNotFoundError, OSError):
-                pass
+            checkpoint_paths = [
+                self.current_checkpoint_path(),
+                *self.checkpoint_fallbacks_for(self.project.xml_path),
+            ]
+            for checkpoint in dict.fromkeys(checkpoint_paths):
+                try:
+                    os.remove(checkpoint)
+                except (FileNotFoundError, OSError):
+                    pass
         return self.project.reset_translations()
 
     def cancel_translation(self) -> None:
@@ -566,26 +725,34 @@ class AppController:
                 return []
             with open(presets_path, encoding="utf-8") as f:
                 data = json.load(f)
-            return data.get("presets", [])
-        except (OSError, json.JSONDecodeError):
+            if not isinstance(data, dict) or not isinstance(data.get("presets"), list):
+                return []
+            return [_normalize_preset(preset) for preset in data["presets"] if isinstance(preset, dict)]
+        except (OSError, json.JSONDecodeError, ValueError):
             return []
 
     def save_tag_preset(
         self,
         label: str,
         parent_tag: str,
-        target_tag: str,
+        target_tag: str | Sequence[str],
         file: str = "",
         folder: str = "",
+        context_tags: Sequence[str] = (),
     ) -> bool:
         """Append a new preset and persist to disk. Returns True on success."""
         import time
+        target_tags = _normalize_tag_list(target_tag)
+        normalized_context = _normalize_tag_list(context_tags)
+        if not target_tags or set(target_tags) & set(normalized_context):
+            return False
         presets = self.get_tag_presets()
         presets.append({
             "id": int(time.time() * 1000),
             "label": label,
             "parent_tag": parent_tag,
-            "target_tag": target_tag,
+            "target_tags": target_tags,
+            "context_tags": normalized_context,
             "file": file,
             "folder": folder,
         })
@@ -626,7 +793,7 @@ class AppController:
         """Write current presets to a user-specified file (folder field stripped — machine-specific)."""
         try:
             presets = [
-                {k: v for k, v in p.items() if k != "folder"}
+                {k: v for k, v in _preset_for_storage(p).items() if k != "folder"}
                 for p in self.get_tag_presets()
             ]
             with open(path, "w", encoding="utf-8") as f:
@@ -638,7 +805,7 @@ class AppController:
     def import_presets(self, path: str) -> tuple[int, int]:
         """
         Merge presets from an external file into the local store.
-        Deduplicates by (label, parent_tag, target_tag).
+        Deduplicates by label, parent tag, target tags, and context tags.
         Returns (imported_count, skipped_count), or (-1, 0) on parse error.
         """
         import time as _time
@@ -652,30 +819,31 @@ class AppController:
             return (-1, 0)
 
         existing = self.get_tag_presets()
-        existing_keys = {
-            (p.get("label", ""), p.get("parent_tag", ""), p.get("target_tag", ""))
-            for p in existing
-        }
+        existing_keys = {_preset_key(p) for p in existing}
         imported = 0
         skipped = 0
         for preset in incoming:
             if not isinstance(preset, dict):
                 skipped += 1
                 continue
-            key = (
-                preset.get("label", ""),
-                preset.get("parent_tag", ""),
-                preset.get("target_tag", ""),
-            )
+            normalized = _normalize_preset(preset)
+            if not normalized["target_tags"] or set(normalized["target_tags"]) & set(
+                normalized["context_tags"]
+            ):
+                skipped += 1
+                continue
+            key = _preset_key(normalized)
             if key in existing_keys:
                 skipped += 1
                 continue
             existing.append({
                 "id": int(_time.time() * 1000) + imported,
-                "label": preset.get("label", ""),
-                "parent_tag": preset.get("parent_tag", ""),
-                "target_tag": preset.get("target_tag", ""),
-                "file": preset.get("file", ""),
+                "label": normalized.get("label", ""),
+                "parent_tag": normalized.get("parent_tag", ""),
+                "target_tags": normalized["target_tags"],
+                "context_tags": normalized["context_tags"],
+                "file": normalized.get("file", ""),
+                "folder": "",
             })
             existing_keys.add(key)
             imported += 1
@@ -688,7 +856,12 @@ class AppController:
         try:
             os.makedirs(user_data_dir(), exist_ok=True)
             with open(user_data_path(PRESETS_FILE), "w", encoding="utf-8") as f:
-                json.dump({"presets": presets}, f, indent=2, ensure_ascii=False)
+                json.dump(
+                    {"presets": [_preset_for_storage(preset) for preset in presets]},
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
             return True
         except OSError:
             return False

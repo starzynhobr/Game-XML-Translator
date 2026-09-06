@@ -12,6 +12,7 @@ Item {
     property var    suggestions: []   // list<string> — populated from ViewModel
     property alias  value: field.text // current tag value (read/write)
     property string placeholderText: ""
+    property bool commitOnTyping: true
 
     // Emitted when the value is committed (item selected or Enter pressed).
     signal committed(string tag)
@@ -72,7 +73,8 @@ Item {
                 _refreshList(text)
                 // Delay the "committed" signal so get_child_tags() isn't called
                 // on every keystroke — fires 300 ms after the user stops typing.
-                commitDebounce.restart()
+                if (root.commitOnTyping)
+                    commitDebounce.restart()
                 // Auto-open popup if there are filtered results
                 if (filteredModel.count > 0 && text.length > 0)
                     popup.open()

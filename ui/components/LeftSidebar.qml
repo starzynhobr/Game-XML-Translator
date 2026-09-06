@@ -11,19 +11,39 @@ Pane {
     required property string logText
     required property int    progressDone
     required property int    progressTotal
+    property bool streamlined: false
 
-    // Shared locale list used by both selectors
+    // UI language locales and translation targets intentionally remain separate.
     property var localeNames: Object.keys(vm.availableLocales)
     property var localeCodes: Object.values(vm.availableLocales)
+    property var targetLocaleNames: Object.keys(vm.availableTranslationTargets)
+    property var targetLocaleCodes: Object.values(vm.availableTranslationTargets)
 
     // Paths found during folder scan (populated by xmlPathsFound signal)
     property var xmlPickerPaths: []
     // Preset pending apply while folder dialog is open
     property var pendingApplyPreset: null
 
+    function formatTags(tags) {
+        if (!tags)
+            return ""
+        var values = []
+        for (var i = 0; i < tags.length; i++)
+            values.push(tags[i])
+        return values.join(", ")
+    }
+
+    function openXmlPicker() {
+        vm.loadXml(parentTagCombo.value, "")
+    }
+
+    function openSettings() {
+        settingsDrawer.open()
+    }
+
     // Index of the currently selected TRANSLATION TARGET locale
     property int currentTargetIdx: {
-        var idx = localeCodes.indexOf(vm.translationTargetCode)
+        var idx = targetLocaleCodes.indexOf(vm.translationTargetCode)
         return idx >= 0 ? idx : 0
     }
 
@@ -162,10 +182,12 @@ Pane {
     Item {
         id: gearRow
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 30
+        height: root.streamlined ? 0 : 30
+        visible: !root.streamlined
 
         Rectangle {
             id: gearBtn
+            objectName: "sidebarSettingsButton"
             anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
             width: 26; height: 26; radius: 5
             color: gearMouse.containsMouse ? Theme.bgSurface2 : "transparent"
@@ -212,23 +234,65 @@ Pane {
         clip: true
 
         ColumnLayout {
+            StatusFilterPanel {
+                Layout.fillWidth: true
+                Layout.leftMargin: 14
+                Layout.rightMargin: 14
+                Layout.topMargin: 8
+            }
             width: parent.width
             spacing: 0
 
+            Label {
+                objectName: "structureSectionTitle"
+                visible: root.streamlined
+                text: vm.strings["structure_section_title"] ?? "XML structure"
+                color: Theme.textPrimary
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                Layout.fillWidth: true
+                Layout.leftMargin: 14; Layout.rightMargin: 44
+                Layout.topMargin: 14
+                Layout.bottomMargin: 2
+                elide: Text.ElideRight
+            }
+
+            Label {
+                visible: root.streamlined
+                text: vm.strings["structure_section_subtitle"]
+                    ?? "Choose the text and context fields"
+                color: Theme.textSecondary
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Layout.leftMargin: 14; Layout.rightMargin: 14
+                Layout.bottomMargin: 10
+            }
+
+            Rectangle {
+                visible: root.streamlined
+                height: 1; color: Theme.borderSubtle
+                Layout.fillWidth: true
+                Layout.leftMargin: 12; Layout.rightMargin: 12
+                Layout.bottomMargin: 12
+            }
+
             // ── Carregar XML ──────────────────────────────────────────────
             AppButton {
+                objectName: "sidebarLoadButton"
+                visible: !root.streamlined
                 text: vm.strings["load_xml_button"] ?? "Load XML"
                 highlighted: true
-                enabled: !vm.isTranslating
+                enabled: !vm.isTranslating && !vm.isXmlBusy
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.topMargin: 10
                 Layout.bottomMargin: vm.loadedFileName ? 3 : 10
-                onClicked: vm.loadXml(parentTagCombo.value, targetTagCombo.value)
+                onClicked: vm.loadXml(parentTagCombo.value, "")
             }
 
             Label {
-                visible: vm.loadedFileName !== ""
+                visible: !root.streamlined && vm.loadedFileName !== ""
                 text: vm.loadedFileName
                 font.pixelSize: 11
                 color: Theme.textSecondary
@@ -241,6 +305,7 @@ Pane {
 
             // ── Separator ─────────────────────────────────────────────────
             Rectangle {
+                visible: !root.streamlined
                 height: 1; color: Theme.borderSubtle
                 Layout.fillWidth: true; Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 10
@@ -248,6 +313,7 @@ Pane {
 
             // ── Translation target language ───────────────────────────────
             Label {
+                visible: !root.streamlined
                 text: vm.strings["translate_to_label"] ?? "Traduzir para:"
                 font.pixelSize: 11
                 color: Theme.textSecondary
@@ -256,17 +322,21 @@ Pane {
             }
             StyledComboBox {
                 id: targetLangCombo
-                model: root.localeNames
+                objectName: "sidebarTargetLocale"
+                visible: !root.streamlined
+                model: root.targetLocaleNames
                 currentIndex: root.currentTargetIdx
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 10
-                onActivated: vm.setTranslationTarget(root.localeCodes[currentIndex])
+                onActivated: vm.setTranslationTarget(root.targetLocaleCodes[currentIndex])
             }
 
             // ── Tag Pai ───────────────────────────────────────────────────
             Label {
-                text: vm.strings["parent_tag_label"] ?? "Parent Tag"
+                text: root.streamlined
+                    ? (vm.strings["structure_parent_tag"] ?? "Parent tag")
+                    : (vm.strings["parent_tag_label"] ?? "Parent Tag")
                 font.pixelSize: 11
                 color: Theme.textSecondary
                 Layout.leftMargin: 12
@@ -275,7 +345,7 @@ Pane {
             TagComboBox {
                 id: parentTagCombo
                 suggestions: vm.parentTags
-                enabled: vm.hasXmlPath
+                enabled: vm.hasXmlPath && !vm.isXmlBusy
                 placeholderText: "ex: baseVillain"
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
@@ -286,41 +356,98 @@ Pane {
                     target: vm
                     function onSelectedTagChanged(parentTag, targetTag) {
                         parentTagCombo.value = parentTag
-                        targetTagCombo.value = targetTag
                     }
                 }
             }
 
-            // ── Tag Alvo ──────────────────────────────────────────────────
+            // ── Tags Alvo ─────────────────────────────────────────────────
             Label {
-                text: vm.strings["target_tag_label"] ?? "Target Tag"
+                text: vm.strings["target_tags_label"] ?? "Target tags"
                 font.pixelSize: 11
                 color: Theme.textSecondary
                 Layout.leftMargin: 12
                 Layout.bottomMargin: 3
             }
-            TagComboBox {
-                id: targetTagCombo
+            TagMultiSelect {
+                id: targetTagsSelect
                 suggestions: vm.childTags
-                enabled: vm.hasXmlPath
-                placeholderText: "ex: bio"
+                selectedValues: vm.selectedTargetTags
+                excludedValues: vm.selectedContextTags
+                enabled: vm.hasXmlPath && !vm.isXmlBusy
+                placeholderText: vm.strings["target_tag_placeholder"] ?? "Add a tag to translate"
+                roleMarker: "T"
+                roleDescription: vm.strings["target_tags_label"] ?? "Target tags"
+                removeText: vm.strings["remove_target_tag"] ?? "Remove target tag"
+                accentColor: Theme.primary
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 8
-                onCommitted: function(tag) { vm.setTargetTag(tag) }
+                onAddRequested: function(tag) { vm.addTargetTag(tag) }
+                onRemoveRequested: function(tag) { vm.removeTargetTag(tag) }
+            }
+
+            // ── Tags de Contexto ─────────────────────────────────────────
+            Label {
+                text: vm.strings["context_tags_label"] ?? "Context tags"
+                font.pixelSize: 11
+                color: Theme.textSecondary
+                Layout.leftMargin: 12
+                Layout.bottomMargin: 3
+            }
+            TagMultiSelect {
+                id: contextTagsSelect
+                suggestions: vm.childTags
+                selectedValues: vm.selectedContextTags
+                excludedValues: vm.selectedTargetTags
+                enabled: vm.hasXmlPath && !vm.isXmlBusy
+                placeholderText: vm.strings["context_tag_placeholder"] ?? "Add context (optional)"
+                roleMarker: "C"
+                roleDescription: vm.strings["context_tags_label"] ?? "Context tags"
+                removeText: vm.strings["remove_context_tag"] ?? "Remove context tag"
+                accentColor: Theme.warning
+                Layout.fillWidth: true
+                Layout.leftMargin: 12; Layout.rightMargin: 12
+                Layout.bottomMargin: 4
+                onAddRequested: function(tag) { vm.addContextTag(tag) }
+                onRemoveRequested: function(tag) { vm.removeContextTag(tag) }
+            }
+
+            Label {
+                text: vm.isXmlBusy
+                    ? vm.xmlBusyMessage
+                    : (vm.strings["tag_selection_summary"] ?? "%1 tag(s) → %2 lines · %3 context")
+                        .replace("%1", vm.selectedTargetTags.length)
+                        .replace("%2", vm.tagPreviewLines)
+                        .replace("%3", vm.selectedContextTags.length)
+                font.pixelSize: 10
+                color: Theme.textSecondary
+                Layout.alignment: Qt.AlignRight
+                Layout.rightMargin: 12
+                Layout.bottomMargin: 8
             }
 
             // ── Reload ────────────────────────────────────────────────────
             AppButton {
                 id: reloadBtn
-                text: vm.strings["reload_button"] ?? "Recarregar"
+                objectName: "applyStructureButton"
+                text: vm.isXmlBusy
+                    ? vm.xmlBusyMessage
+                    : (root.streamlined && vm.tagPreviewLines > 0
+                        ? (vm.strings["apply_structure_count_button"] ?? "Load %1 lines")
+                            .replace("%1", vm.tagPreviewLines)
+                        : (root.streamlined
+                            ? (vm.strings["apply_structure_button"] ?? "Apply structure")
+                            : (vm.strings["reload_button"] ?? "Recarregar")))
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 10
-                enabled: vm.hasXmlPath && !vm.isTranslating
+                enabled: vm.hasXmlPath && parentTagCombo.value !== ""
+                    && vm.selectedTargetTags.length > 0 && !vm.isTranslating && !vm.isXmlBusy
                 onClicked: vm.reloadXml()
                 ToolTip.visible: hovered; ToolTip.delay: 400
-                ToolTip.text: vm.strings["reload_button"] ?? "Recarregar"
+                ToolTip.text: root.streamlined
+                    ? (vm.strings["apply_structure_button"] ?? "Apply structure")
+                    : (vm.strings["reload_button"] ?? "Recarregar")
                 background: Rectangle {
                     color: reloadBtn.enabled
                         ? (reloadBtn.hovered ? Theme.bgSurface3 : Theme.bgSurface2)
@@ -348,6 +475,7 @@ Pane {
 
             // ── Progress ──────────────────────────────────────────────────
             Label {
+                visible: !root.streamlined
                 text: vm.strings["progress_label"] ?? "Progress"
                 font.pixelSize: 11
                 color: Theme.textSecondary
@@ -357,6 +485,8 @@ Pane {
 
             ProgressBar {
                 id: progressBar
+                objectName: "sidebarProgress"
+                visible: !root.streamlined
                 value: root.progressTotal > 0 ? root.progressDone / root.progressTotal : 0
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
@@ -377,6 +507,7 @@ Pane {
             }
 
             Label {
+                visible: !root.streamlined
                 text: {
                     var tpl = vm.strings["stats_template"] ?? "Done: {done} / {total}"
                     return tpl.replace("{done}", root.progressDone).replace("{total}", root.progressTotal)
@@ -390,11 +521,13 @@ Pane {
             // ── Export XML ────────────────────────────────────────────────
             AppButton {
                 id: exportXmlBtn
+                objectName: "sidebarExportButton"
+                visible: !root.streamlined
                 text: vm.strings["export_button"] ?? "Export XML"
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 6
-                enabled: root.progressDone > 0 && !vm.isTranslating
+                enabled: root.progressDone > 0 && !vm.isTranslating && !vm.isXmlBusy
                 onClicked: vm.exportXml("")
 
                 background: Rectangle {
@@ -417,6 +550,7 @@ Pane {
             }
 
             Rectangle {
+                visible: !root.streamlined
                 height: 1; color: Theme.borderSubtle
                 Layout.fillWidth: true; Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 6
@@ -425,11 +559,12 @@ Pane {
             // ── Save In Place ─────────────────────────────────────────────
             AppButton {
                 id: saveInPlaceBtn
+                objectName: "sidebarSaveInPlaceButton"
                 text: vm.strings["save_inplace_button"] ?? "💾 Save to Current File"
                 Layout.fillWidth: true
                 Layout.leftMargin: 12; Layout.rightMargin: 12
                 Layout.bottomMargin: 12
-                enabled: vm.entryCount > 0 && !vm.isTranslating
+                enabled: vm.entryCount > 0 && !vm.isTranslating && !vm.isXmlBusy
                 onClicked: overwriteDialog.open()
 
                 background: Rectangle {
@@ -456,6 +591,7 @@ Pane {
     // Slides in from the left edge of the window overlay.
     Popup {
         id: settingsDrawer
+        objectName: "settingsDrawer"
         parent: Overlay.overlay
         x: 0; y: 0
         width: 270
@@ -572,14 +708,14 @@ Pane {
                         AppButton {
                             text: vm.strings["import_json_button"] ?? "Importar JSON"
                             Layout.fillWidth: true; font.pixelSize: 12
-                            enabled: !vm.isTranslating; onClicked: vm.importJson("")
+                            enabled: !vm.isTranslating && !vm.isXmlBusy; onClicked: vm.importJson("")
                             ToolTip.visible: hovered; ToolTip.delay: 400
                             ToolTip.text: vm.strings["import_json_button"] ?? "Importar JSON"
                         }
                         AppButton {
                             text: vm.strings["import_csv_button"] ?? "Importar CSV"
                             Layout.fillWidth: true; font.pixelSize: 12
-                            enabled: !vm.isTranslating; onClicked: vm.importCsv("")
+                            enabled: !vm.isTranslating && !vm.isXmlBusy; onClicked: vm.importCsv("")
                             ToolTip.visible: hovered; ToolTip.delay: 400
                             ToolTip.text: vm.strings["import_csv_button"] ?? "Importar CSV"
                         }
@@ -612,7 +748,8 @@ Pane {
                             id: drawerSavePresetBtn
                             text: vm.strings["save_preset_button"] ?? "💾 Salvar Preset"
                             Layout.fillWidth: true; font.pixelSize: 12
-                            enabled: vm.hasXmlPath && parentTagCombo.value !== "" && targetTagCombo.value !== ""
+                            enabled: vm.hasXmlPath && parentTagCombo.value !== ""
+                                && vm.selectedTargetTags.length > 0 && !vm.isXmlBusy
                             onClicked: {
                                 savePresetLabelField.text = ""
                                 savePresetFileField.text = vm.loadedFileName
@@ -715,6 +852,84 @@ Pane {
                         }
 
                         onActivated: themeCtrl.setTheme(model[currentIndex])
+                    }
+
+                    Label {
+                        text: vm.strings["ui_mode_label"] ?? "Interface"
+                        font.pixelSize: 11
+                        color: Theme.textSecondary
+                        Layout.leftMargin: 18
+                        Layout.bottomMargin: 2
+                    }
+
+                    StyledComboBox {
+                        id: uiModeCombo
+                        model: [
+                            vm.strings["ui_mode_classic"] ?? "Classic",
+                            vm.strings["ui_mode_modern"] ?? "New"
+                        ]
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 18; Layout.rightMargin: 18
+                        currentIndex: vm.currentUiMode === "modern" ? 1 : 0
+                        onActivated: vm.setUiMode(currentIndex === 1 ? "modern" : "classic")
+                    }
+
+                    Label {
+                        text: vm.strings["ui_mode_restart_hint"]
+                            ?? "The change is applied after restarting the app."
+                        font.pixelSize: 10
+                        color: Theme.textDisabled
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 18; Layout.rightMargin: 18
+                        Layout.bottomMargin: 16
+                    }
+
+                    Rectangle {
+                        height: 1; color: Theme.borderSubtle
+                        Layout.fillWidth: true; Layout.leftMargin: 18; Layout.rightMargin: 18
+                        Layout.bottomMargin: 14
+                    }
+
+                    Label {
+                        text: vm.strings["updates_section_title"] ?? "Updates"
+                        font.pixelSize: 12; font.weight: Font.Medium
+                        color: Theme.textSecondary
+                        Layout.leftMargin: 18
+                        Layout.bottomMargin: 2
+                    }
+                    Label {
+                        text: (vm.strings["update_current_version"] ?? "Installed version: %1")
+                            .arg(vm.appVersion)
+                        font.pixelSize: 10
+                        color: Theme.textDisabled
+                        Layout.leftMargin: 18; Layout.rightMargin: 18
+                        Layout.bottomMargin: 8
+                    }
+                    AppButton {
+                        objectName: "checkForUpdatesButton"
+                        text: vm.updateStatus === "checking"
+                            ? (vm.strings["update_status_checking"] ?? "Checking…")
+                            : (vm.strings["update_check_now"] ?? "Check for updates")
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 18; Layout.rightMargin: 18
+                        font.pixelSize: 12
+                        enabled: vm.updateStatus !== "checking" && vm.updateStatus !== "downloading"
+                        onClicked: vm.checkForUpdates()
+                    }
+                    Label {
+                        objectName: "updateStatusLabel"
+                        text: vm.updateStatusText
+                        visible: vm.updateStatus !== "idle"
+                        font.pixelSize: 10
+                        color: vm.updateStatus === "error"
+                            ? Theme.danger
+                            : vm.updateStatus === "up_to_date" ? Theme.success : Theme.textSecondary
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 18; Layout.rightMargin: 18
+                        Layout.topMargin: 6
+                        Layout.bottomMargin: 16
                     }
 
                     Item { implicitHeight: 8; Layout.fillWidth: true }
@@ -872,16 +1087,27 @@ Pane {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 32; radius: 4
+                    height: 50; radius: 4
                     color: Theme.bgSurface1
                     border.color: Theme.borderSubtle; border.width: 1
-                    Label {
+                    Column {
                         anchors { left: parent.left; right: parent.right
                                   verticalCenter: parent.verticalCenter
                                   leftMargin: 10; rightMargin: 10 }
-                        text: parentTagCombo.value + "  →  " + targetTagCombo.value
-                        font.pixelSize: 12; font.weight: Font.Medium
-                        color: Theme.primary; elide: Text.ElideRight
+                        spacing: 2
+                        Label {
+                            width: parent.width
+                            text: parentTagCombo.value + "  →  " + root.formatTags(vm.selectedTargetTags)
+                            font.pixelSize: 12; font.weight: Font.Medium
+                            color: Theme.primary; elide: Text.ElideRight
+                        }
+                        Label {
+                            width: parent.width
+                            text: (vm.strings["context_tags_short"] ?? "Context") + ": "
+                                + (root.formatTags(vm.selectedContextTags) || "—")
+                            font.pixelSize: 10
+                            color: Theme.textSecondary; elide: Text.ElideRight
+                        }
                     }
                 }
 
@@ -950,10 +1176,11 @@ Pane {
                     text: vm.strings["save_preset_save_button"] ?? "Salvar"
                     enabled: savePresetLabelField.text.trim() !== ""
                     onClicked: {
-                        vm.saveTagPreset(
+                        vm.saveTagPresetMulti(
                             savePresetLabelField.text.trim(),
                             parentTagCombo.value,
-                            targetTagCombo.value,
+                            vm.selectedTargetTags,
+                            vm.selectedContextTags,
                             savePresetFileField.text.trim(),
                             ""
                         )
@@ -1132,7 +1359,11 @@ Pane {
                                     spacing: 6
                                     Label {
                                         Layout.fillWidth: true
-                                        text: (modelData.parent_tag ?? "") + " → " + (modelData.target_tag ?? "")
+                                        text: (modelData.parent_tag ?? "") + " → "
+                                            + root.formatTags(modelData.target_tags ?? [])
+                                            + ((modelData.context_tags ?? []).length > 0
+                                                ? "  ·  C: " + root.formatTags(modelData.context_tags)
+                                                : "")
                                         font.pixelSize: 11; color: Theme.primary
                                         elide: Text.ElideRight
                                     }
@@ -1170,10 +1401,11 @@ Pane {
                                         root.pendingApplyPreset = modelData
                                         gameFolderDialog.open()
                                     } else {
-                                        vm.applyTagPreset(
+                                        vm.applyTagPresetMulti(
                                             modelData.label ?? "",
                                             modelData.parent_tag ?? "",
-                                            modelData.target_tag ?? "",
+                                            modelData.target_tags ?? [],
+                                            modelData.context_tags ?? [],
                                             fileHint
                                         )
                                         loadPresetDialog.close()
@@ -1340,10 +1572,11 @@ Pane {
             vm.setGameFolder(path)
             if (root.pendingApplyPreset !== null) {
                 var p = root.pendingApplyPreset
-                vm.applyTagPreset(
+                vm.applyTagPresetMulti(
                     p.label ?? "",
                     p.parent_tag ?? "",
-                    p.target_tag ?? "",
+                    p.target_tags ?? [],
+                    p.context_tags ?? [],
                     p.file ?? ""
                 )
                 loadPresetDialog.close()

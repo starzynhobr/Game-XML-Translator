@@ -31,10 +31,9 @@ A desktop tool for modders and localization teams to translate XML files from ga
 ```powershell
 git clone https://github.com/StarzynhoBR/STZ-XML-Translator.git
 cd STZ-XML-Translator
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e ".[dev]"
-python main_qt.py
+uv venv
+uv pip install -e ".[dev]"
+uv run python main_qt.py
 ```
 
 No API key is required to run the app. Google Translate (free) works out of the box; AI providers require a key configured via the **API Key Configuration** button.
@@ -43,21 +42,17 @@ No API key is required to run the app. Google Translate (free) works out of the 
 
 ## Installing a Release Build
 
-Release builds are distributed as a signed MSIX package. Download these three files from the same GitHub Release and keep them in the same folder:
+Download the recommended installer from the latest GitHub Release:
 
-- `STZXMLTranslator-x.y.z.0.msix`
-- `STZXMLTranslator.cer`
-- `install-app.ps1`
+- `STZXMLTranslator-Setup-x.y.z.exe`
 
-Then run the installer script:
+Open the Setup and follow the installation wizard. It installs per user under Local AppData, creates Start Menu shortcuts, and does not require administrator privileges. Windows SmartScreen may show an unknown-publisher warning because the installer is not signed by a public code-signing authority.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install-app.ps1
-```
+The optional `STZXMLTranslator-Portable-x.y.z.zip` contains the same standalone build without an installer.
 
-Why a script? The MSIX is signed with the project's certificate, so Windows must trust the public `.cer` certificate before installing the package. The script is intentionally small and readable: it installs `STZXMLTranslator.cer` into the Windows Trusted Root store and then installs the `.msix` with `Add-AppxPackage`.
+Starting with version 1.4.0, installed builds check GitHub Releases in the background at most once per day. When a newer version is available, the app can download it, verify its SHA-256 digest, and open the Setup after user confirmation. Updates are never installed silently or while translation/XML work is active.
 
-If you prefer to review it first, open `install-app.ps1` in a text editor before running it. The private signing key is not included in the release; it is stored only as a GitHub Actions secret.
+Checks can also be started manually from **Settings → Updates**.
 
 ---
 
@@ -103,7 +98,7 @@ The project ships with a Nuitka build script for Windows:
 build_nuitka.bat
 ```
 
-This activates `.venv` when present and produces `dist\main_qt.dist\STZXMLTranslator.exe`.
+This activates `.venv` when present and produces the standalone app plus `dist\STZXMLTranslator-Setup-x.y.z.exe` when Inno Setup 6 is installed.
 Static Nuitka flags live in `main_qt.py` as `# nuitka-project:` comments.
 Only dynamic flags such as version, jobs, and report output are passed by `build_nuitka.bat`.
 
@@ -122,6 +117,7 @@ core/
   extrator.py            XML text extraction
   injetor.py             XML translation injection
   tradutor_api.py        Provider adapters (Gemini, DeepL, Azure, Ollama, Google)
+  updater.py             GitHub release discovery, verified download, installer launch
   i18n.py                Locale loader
 ui/
   main.qml               Root ApplicationWindow
@@ -138,6 +134,7 @@ ui/
     StyledScrollBar.qml  Thin tokenized scroll indicator
     GlossaryDialog.qml   Fixed-term glossary editor
     AppButton.qml        Themed button base
+    UpdateBanner.qml     Available-update actions and download progress
 locales/                 UI strings — en_US, pt_BR, es_ES, fr_FR, ja_JP
 assets/
   stz-xml.png            Source application icon
@@ -156,7 +153,7 @@ config.json              User preferences — API keys, theme, language (created
 ## Running Tests
 
 ```powershell
-python -m pytest
+uv run pytest
 ```
 
 All tests are in `tests/` and run without launching the GUI. The suite covers theme token structure, locale key parity across all five languages, and AppController business logic.

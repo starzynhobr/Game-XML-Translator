@@ -7,7 +7,7 @@ import "components"
 
 ApplicationWindow {
     id: root
-    title: vm.strings["window_title"] ?? "Game XML Translator"
+    title: (vm.strings["window_title"] ?? "STZ XML Translator") + " v" + vm.appVersion
     width: 1280
     height: 760
     minimumWidth: 1024
@@ -38,6 +38,8 @@ ApplicationWindow {
     property string selectedXpath: ""
     property string selectedOriginal: ""
     property string selectedTranslation: ""
+    property string selectedSourceTag: ""
+    property var selectedEntryContext: ({})
 
     Connections {
         target: vm
@@ -55,69 +57,96 @@ ApplicationWindow {
             root.selectedOriginal    = original
             root.selectedTranslation = translation
         }
+        function onEntryMetadataSelected(sourceTag, context) {
+            root.selectedSourceTag = sourceTag
+            root.selectedEntryContext = context
+        }
         function onXmlLoaded(count) {
             logPanel.clear()
             root.logText = ""
+            root.selectedXpath = ""
+            root.selectedOriginal = ""
+            root.selectedTranslation = ""
+            root.selectedSourceTag = ""
+            root.selectedEntryContext = ({})
         }
         function onErrorOccurred(msg) {
             root.logText += "[ERRO] " + msg + "\n"
         }
         function onLanguageChanged() {
-            root.title = vm.strings["window_title"] ?? "Game XML Translator"
+            root.title = (vm.strings["window_title"] ?? "STZ XML Translator")
+                + " v" + vm.appVersion
         }
     }
 
     // ---------------------------------------------------------------
     // Main layout: Left | Center | Right
     // ---------------------------------------------------------------
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 6
         spacing: 6
 
-        LeftSidebar {
-            id: leftPanel
-            Layout.preferredWidth: 290
-            Layout.fillHeight: true
-
-            logText:       root.logText
-            progressDone:  root.progressDone
-            progressTotal: root.progressTotal
+        UpdateBanner {
+            Layout.fillWidth: true
+            Layout.maximumHeight: implicitHeight
         }
 
-        // Center: Table + Log stacked
-        ColumnLayout {
-            Layout.fillWidth:  true
+        RowLayout {
+            Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 6
 
-            TranslationTable {
-                id: mainTable
-                Layout.fillWidth:  true
+            LeftSidebar {
+                id: leftPanel
+                Layout.preferredWidth: 290
                 Layout.fillHeight: true
 
-                onRowClicked: (row) => vm.selectRow(row)
+                logText:       root.logText
+                progressDone:  root.progressDone
+                progressTotal: root.progressTotal
             }
 
-            LogPanel {
-                id: logPanel
+            // Center: Table + Log stacked
+            ColumnLayout {
                 Layout.fillWidth:  true
-                Layout.preferredHeight: 110
-                logText: root.logText
+                Layout.fillHeight: true
+                spacing: 6
+
+                TranslationTable {
+                    id: mainTable
+                    Layout.fillWidth:  true
+                    Layout.fillHeight: true
+
+                    onRowClicked: (row) => vm.selectRow(row)
+                    onSelectedRowsChanged: (rows) => vm.setSelectedRows(rows)
+                    onEditRequested: rightPanel.focusTranslation()
+                }
+
+                LogPanel {
+                    id: logPanel
+                    Layout.fillWidth:  true
+                    Layout.preferredHeight: 110
+                    logText: root.logText
+                }
             }
-        }
 
-        EditPanel {
-            id: rightPanel
-            Layout.preferredWidth: 330
-            Layout.fillHeight: true
+            EditPanel {
+                id: rightPanel
+                Layout.preferredWidth: 330
+                Layout.fillHeight: true
 
-            xpath:          root.selectedXpath
-            originalText:   root.selectedOriginal
-            translationText: root.selectedTranslation
+                xpath:          root.selectedXpath
+                originalText:   root.selectedOriginal
+                translationText: root.selectedTranslation
+                sourceTag: root.selectedSourceTag
+                entryContext: root.selectedEntryContext
 
-            onTranslationEdited: (text) => {
-                root.selectedTranslation = text
+                onTranslationEdited: (text) => {
+                    root.selectedTranslation = text
+                }
+                onPreviousRequested: mainTable.selectRelative(-1)
+                onNextRequested: mainTable.selectRelative(1)
             }
         }
     }

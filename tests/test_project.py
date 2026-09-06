@@ -28,7 +28,15 @@ class TestTranslationEntry:
         assert e.xpath == "/x"
         assert e.original == "orig"
         assert e.translation == "trans"
-        assert e.status == "done"
+        assert e.status == "translated"
+
+    def test_context_metadata_defaults_are_isolated(self):
+        first = TranslationEntry(xpath="/a", original="A")
+        second = TranslationEntry(xpath="/b", original="B")
+
+        first.context["name"] = "Hero"
+
+        assert second.context == {}
 
 
 class TestTranslationProjectLoad:
@@ -54,7 +62,31 @@ class TestTranslationProjectLoad:
         # Reload same file
         loaded_project.load(FIXTURE_XML, "item", "dispName")
         assert loaded_project.entries[first_xpath].translation == "Herói da Luz"
-        assert loaded_project.entries[first_xpath].status == "done"
+        assert loaded_project.entries[first_xpath].status == "translated"
+
+    def test_load_accepts_multiple_targets_and_context_tags(self):
+        project = TranslationProject()
+
+        sucesso, erro = project.load(
+            FIXTURE_XML,
+            "item",
+            ["dispName", "description"],
+            ["id"],
+        )
+
+        assert sucesso is True, erro
+        assert len(project.entries) == 6
+        assert project.target_tags == ["dispName", "description"]
+        assert project.context_tags == ["id"]
+        first = next(iter(project.entries.values()))
+        assert first.source_tag == "dispName"
+        assert first.container_xpath == "/root/item[1]"
+        assert first.context == {"id": "001"}
+
+    def test_single_target_load_keeps_legacy_target_tag_property(self, loaded_project):
+        assert loaded_project.target_tag == "dispName"
+        assert loaded_project.target_tags == ["dispName"]
+        assert loaded_project.context_tags == []
 
 
 class TestTranslationProjectEntryAccess:
@@ -72,7 +104,7 @@ class TestTranslationProjectEntryAccess:
         loaded_project.set_translation(xpath, "Traduzido")
         entry = loaded_project.get_entry(xpath)
         assert entry.translation == "Traduzido"
-        assert entry.status == "done"
+        assert entry.status == "translated"
 
     def test_set_translation_with_custom_status(self, loaded_project):
         xpath = next(iter(loaded_project.entries))
@@ -99,6 +131,43 @@ class TestTranslationProjectEntryAccess:
         mapping = loaded_project.get_translations_map()
         assert len(mapping) == 2
         assert mapping[xpaths[0]] == "Tradução A"
+
+    def test_apply_translation_to_exact_duplicates(self):
+        project = TranslationProject()
+        project.entries = {
+            "/a": TranslationEntry("/a", "Repeated line"),
+            "/b": TranslationEntry("/b", "Repeated line"),
+            "/c": TranslationEntry("/c", "Repeated line!"),
+        }
+
+        changed = project.apply_translation_to_duplicates("/a", "Linha repetida")
+
+        assert changed == ["/a", "/b"]
+        assert project.entries["/a"].translation == "Linha repetida"
+        assert project.entries["/b"].translation == "Linha repetida"
+        assert project.entries["/c"].translation == ""
+
+    def test_apply_duplicates_preserves_other_completed_entries(self):
+        project = TranslationProject()
+        project.entries = {
+            "/a": TranslationEntry("/a", "Same"),
+            "/b": TranslationEntry("/b", "Same", "Revisada", "done"),
+        }
+
+        changed = project.apply_translation_to_duplicates("/a", "Nova", pending_only=True)
+
+        assert changed == ["/a"]
+        assert project.entries["/b"].translation == "Revisada"
+
+    def test_duplicate_count_counts_pending_exact_matches(self):
+        project = TranslationProject()
+        project.entries = {
+            "/a": TranslationEntry("/a", "Same"),
+            "/b": TranslationEntry("/b", "Same"),
+            "/c": TranslationEntry("/c", "Same", "Done", "done"),
+        }
+
+        assert project.duplicate_count("/a") == 2
 
 
 class TestTranslationProjectStats:
@@ -130,6 +199,58 @@ class TestCheckpoint:
         assert "_pt_" in pt
         assert "_en_" in en
 
+    def test_checkpoint_path_is_tag_selection_specific(self, tmp_path):
+        bio = TranslationProject.checkpoint_path(
+            FIXTURE_XML,
+            "pt",
+            str(tmp_path),
+            parent_tag="item",
+            target_tags=["bio"],
+            context_tags=["dispName"],
+        )
+        description = TranslationProject.checkpoint_path(
+            FIXTURE_XML,
+            "pt",
+            str(tmp_path),
+            parent_tag="item",
+            target_tags=["description"],
+            context_tags=["dispName"],
+        )
+
+        assert bio != description
+
+    def test_checkpoint_signature_is_independent_of_tag_order(self, tmp_path):
+        first = TranslationProject.checkpoint_path(
+            FIXTURE_XML,
+            "pt",
+            str(tmp_path),
+            parent_tag="item",
+            target_tags=["bio", "description"],
+            context_tags=["dispName", "id"],
+        )
+        second = TranslationProject.checkpoint_path(
+            FIXTURE_XML,
+            "pt",
+            str(tmp_path),
+            parent_tag="item",
+            target_tags=["description", "bio"],
+            context_tags=["id", "dispName"],
+        )
+
+        assert first == second
+
+    def test_new_checkpoint_name_differs_from_legacy_name(self, tmp_path):
+        legacy = TranslationProject.checkpoint_path(FIXTURE_XML, "pt", str(tmp_path))
+        current = TranslationProject.checkpoint_path(
+            FIXTURE_XML,
+            "pt",
+            str(tmp_path),
+            parent_tag="item",
+            target_tags=["dispName"],
+        )
+
+        assert current != legacy
+
     def test_save_and_load_checkpoint(self, tmp_path, loaded_project):
         xpaths = list(loaded_project.entries.keys())
         loaded_project.set_translation(xpaths[0], "Herói da Luz")
@@ -145,7 +266,7 @@ class TestCheckpoint:
 
         assert count == 2
         assert p2.entries[xpaths[0]].translation == "Herói da Luz"
-        assert p2.entries[xpaths[1]].status == "done"
+        assert p2.entries[xpaths[1]].status == "translated"
 
     def test_load_nonexistent_checkpoint_returns_zero(self, loaded_project):
         count = loaded_project.load_checkpoint("/nonexistent/ckpt.json")
@@ -155,6 +276,31 @@ class TestCheckpoint:
         bad = tmp_path / "bad.json"
         bad.write_text("not json {{{{", encoding="utf-8")
         assert loaded_project.load_checkpoint(str(bad)) == 0
+
+    def test_load_checkpoint_falls_back_only_when_primary_is_missing(
+        self, tmp_path, loaded_project
+    ):
+        xpath = next(iter(loaded_project.entries))
+        primary = tmp_path / "current.json"
+        legacy = tmp_path / "legacy.json"
+        legacy.write_text(json.dumps({xpath: "Legado"}), encoding="utf-8")
+
+        count = loaded_project.load_checkpoint_with_fallback(str(primary), [str(legacy)])
+
+        assert count == 1
+        assert loaded_project.entries[xpath].translation == "Legado"
+
+    def test_existing_primary_blocks_legacy_fallback(self, tmp_path, loaded_project):
+        xpath = next(iter(loaded_project.entries))
+        primary = tmp_path / "current.json"
+        legacy = tmp_path / "legacy.json"
+        primary.write_text("not valid json", encoding="utf-8")
+        legacy.write_text(json.dumps({xpath: "Legado"}), encoding="utf-8")
+
+        count = loaded_project.load_checkpoint_with_fallback(str(primary), [str(legacy)])
+
+        assert count == 0
+        assert loaded_project.entries[xpath].translation == ""
 
 
 class TestExport:
@@ -199,7 +345,7 @@ class TestImport:
         count = loaded_project.import_json(str(src))
         assert count == 2
         assert loaded_project.entries[xpaths[0]].translation == "Herói"
-        assert loaded_project.entries[xpaths[0]].status == "done"
+        assert loaded_project.entries[xpaths[0]].status == "translated"
 
     def test_import_json_unknown_xpaths_ignored(self, tmp_path, loaded_project):
         data = {"/nonexistent/xpath": "ghost"}

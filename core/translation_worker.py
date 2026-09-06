@@ -6,11 +6,15 @@ from collections.abc import Callable
 
 from core.project import TranslationProject
 from core.tradutor_api import (
+    apply_glossary,
+    build_reference_context,
     get_gemini_model,
+    provider_supports_context,
     translate_batch_google_free,
     translate_batch_ollama,
     translate_text,
 )
+from core.translation_errors import ERROR_MESSAGES, classify_error
 
 
 class TranslationWorker:
@@ -28,6 +32,9 @@ class TranslationWorker:
             self._project.xml_path,
             self._config.get("target_lang", ""),
             self._config.get("checkpoint_dir", "checkpoints"),
+            parent_tag=self._project.parent_tag,
+            target_tags=self._project.target_tags,
+            context_tags=self._project.context_tags,
         )
     BATCH_SIZE = 120
     BATCH_DELAY_SECONDS = 5
@@ -49,6 +56,7 @@ class TranslationWorker:
         self._on_batch_start = on_batch_start
         self._cancel_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._batch_error_code = "batch_failed"
 
     # ------------------------------------------------------------------
     # Control
@@ -74,10 +82,23 @@ class TranslationWorker:
         if not entry:
             return "ERRO: entrada não encontrada."
         service = self._config.get("service", "Gemini")
+        self._project.mark_translating(xpath)
         try:
-            return translate_text(service, entry.original, self._config)
+            result = translate_text(service, entry.original, self._config_for_entry(entry))
+            if not result or not result.strip():
+                raise ValueError("Empty translation response")
+            self._project.set_translation(xpath, result)
+            return result
         except Exception as exc:
-            return f"ERRO na API: {exc}"
+            self._project.mark_error(xpath, classify_error(exc))
+            return entry.error_message
+
+    def _config_for_entry(self, entry) -> dict:
+        """Attach XML metadata without mutating the shared worker configuration."""
+        config = dict(self._config)
+        config["source_tag"] = entry.source_tag
+        config["entry_context"] = dict(entry.context)
+        return config
 
     # ------------------------------------------------------------------
     # Batch translation (background thread)
@@ -99,6 +120,10 @@ class TranslationWorker:
             "api_error":          "ERRO na API: {exc}",
             "batch_count":        "Lote concluído. Total traduzido: {done}",
             "final_done":         "Tradução em lote finalizada.",
+            "context_unsupported": (
+                "AVISO: {provider} não oferece contexto separado; "
+                "os campos de contexto serão ignorados nesta execução."
+            ),
         }
         strings = self._config.get("_strings", {})
         template = strings.get(key) or _fallbacks.get(key, key)
@@ -108,16 +133,44 @@ class TranslationWorker:
             return template
 
     def _run(self) -> None:
+        # Always clear transient states, including cancellation and unexpected errors.
+        callback = self._on_done
+        self._on_done = lambda: None
+        try:
+            self._run_batches()
+        except Exception as exc:
+            for entry in self._project.entries.values():
+                if entry.status == "translating":
+                    self._project.mark_error(entry.xpath, classify_error(exc))
+            self._on_log(self._s("api_error", exc=ERROR_MESSAGES[classify_error(exc)]))
+        finally:
+            self._project.recover_interrupted()
+            self._project.save_checkpoint(self._checkpoint_file)
+            self._on_done = callback
+            callback()
+
+    def _run_batches(self) -> None:
         project = self._project
 
-        loaded = project.load_checkpoint(self._checkpoint_file)
+        loaded = 0 if any(e.translation or e.status != "pending" for e in project.entries.values()) else project.load_checkpoint_with_fallback(
+            self._checkpoint_file,
+            self._config.get("checkpoint_fallbacks", []),
+        )
         if loaded:
             self._on_log(self._s("checkpoint_loaded", n=loaded))
 
         skip_rows = int(self._config.get("skip_rows", 0))
         all_entries = list(project.entries.values())
-        candidates = all_entries[skip_rows:] if skip_rows > 0 else all_entries
-        pending = [e for e in candidates if e.status != "done"]
+        selected_xpaths = self._config.get("selected_xpaths")
+        if selected_xpaths is not None:
+            selected_set = set(selected_xpaths)
+            candidates = [entry for entry in all_entries if entry.xpath in selected_set]
+        else:
+            candidates = all_entries[skip_rows:] if skip_rows > 0 else all_entries
+        if selected_xpaths is not None and self._config.get("include_done", False):
+            pending = candidates
+        else:
+            pending = [e for e in candidates if e.needs_translation]
 
         if not pending:
             self._on_log(self._s("all_done"))
@@ -128,6 +181,8 @@ class TranslationWorker:
         self._on_log(self._s("batch_start", total=total))
 
         service = self._config.get("service", "Gemini")
+        if any(entry.context for entry in pending) and not provider_supports_context(service):
+            self._on_log(self._s("context_unsupported", provider=service))
 
         for i in range(0, total, self.BATCH_SIZE):
             if self._cancel_event.is_set():
@@ -137,11 +192,15 @@ class TranslationWorker:
 
             batch = pending[i : i + self.BATCH_SIZE]
 
+            for entry in batch:
+                project.mark_translating(entry.xpath)
+
             if service == "Gemini":
                 if self._on_batch_start:
                     self._on_batch_start([e.xpath for e in batch])
                 self._on_log(self._s("sending_gemini", n=len(batch)))
 
+                self._batch_error_code = "batch_failed"
                 results = self._translate_batch_gemini(batch)
 
                 if self._cancel_event.is_set():
@@ -150,16 +209,19 @@ class TranslationWorker:
                     return
 
                 if results is None:
+                    for entry in batch:
+                        project.mark_error(entry.xpath, self._batch_error_code)
                     self._on_log(self._s("batch_failed"))
                     break
 
                 skipped = 0
                 for entry in batch:
                     text = results.get(entry.xpath)
-                    if text:
+                    if text and text.strip():
                         project.set_translation(entry.xpath, text, status="done")
                         self._on_entry_translated(entry.xpath, text)
                     else:
+                        project.mark_error(entry.xpath, "missing_result")
                         skipped += 1
 
                 if skipped:
@@ -178,16 +240,19 @@ class TranslationWorker:
                     return
 
                 if results is None:
+                    for entry in batch:
+                        project.mark_error(entry.xpath, "batch_failed")
                     self._on_log(self._s("batch_failed"))
                     break
 
                 skipped = 0
                 for entry in batch:
                     text = results.get(entry.xpath)
-                    if text:
+                    if text and text.strip():
                         project.set_translation(entry.xpath, text, status="done")
                         self._on_entry_translated(entry.xpath, text)
                     else:
+                        project.mark_error(entry.xpath, "missing_result")
                         skipped += 1
 
                 if skipped:
@@ -213,12 +278,16 @@ class TranslationWorker:
                             if len(mini) > 1:
                                 self._on_log(self._s("ollama_mini", n=len(mini)))
                             results = translate_batch_ollama(mini, self._config)
+                            if self._cancel_event.is_set():
+                                return
                             if results is not None:
                                 for entry in mini:
                                     text = results.get(entry.xpath, "")
-                                    if text:
+                                    if text and text.strip():
                                         project.set_translation(entry.xpath, text, status="done")
                                         self._on_entry_translated(entry.xpath, text)
+                                    else:
+                                        project.mark_error(entry.xpath, "missing_result")
                                 idx += len(mini)
                                 continue
                             if len(mini) > 1:
@@ -228,11 +297,20 @@ class TranslationWorker:
                     if self._on_batch_start:
                         self._on_batch_start([entry.xpath])
                     try:
-                        text = translate_text(service, entry.original, self._config)
+                        text = translate_text(
+                            service,
+                            entry.original,
+                            self._config_for_entry(entry),
+                        )
+                        if self._cancel_event.is_set():
+                            return
+                        if not text or not text.strip():
+                            raise ValueError("Empty translation response")
                         project.set_translation(entry.xpath, text, status="done")
                         self._on_entry_translated(entry.xpath, text)
                     except Exception as exc:
-                        self._on_log(self._s("api_error", exc=exc))
+                        project.mark_error(entry.xpath, classify_error(exc))
+                        self._on_log(self._s("api_error", exc=ERROR_MESSAGES[classify_error(exc)]))
                         failed = True
                         break
                     idx += 1
@@ -256,19 +334,38 @@ class TranslationWorker:
 
     def _translate_batch_gemini(self, batch) -> dict[str, str] | None:
         """Gemini: sends all entries in one prompt block for efficiency."""
-        batch_text = "".join(f"[ID: {e.xpath}]\n{e.original}\n---\n" for e in batch)
         try:
             model = get_gemini_model(
                 self._config.get("model", "models/gemini-flash-lite-latest"),
                 api_key=self._config.get("api_key", ""),
             )
             target_label = self._config.get("target_label", "Portuguese (Brazil)")
-            ctx = (self._config.get("translation_context") or "").strip()
-            context_line = f"Context: {ctx}\n" if ctx else ""
+            target_lang = self._config.get("target_lang", "pt")
+            prepared_entries = []
+            glossary_used = False
+            for entry in batch:
+                prepared, used = apply_glossary(entry.original, target_lang)
+                entry_config = self._config_for_entry(entry)
+                reference_context = build_reference_context(entry_config)
+                prepared_entries.append((entry.xpath, prepared, reference_context))
+                glossary_used = glossary_used or used
+            batch_text = "".join(
+                f"[ID: {xpath}]\n{reference_context}TEXT TO TRANSLATE:\n{text}\n---\n"
+                for xpath, text, reference_context in prepared_entries
+            )
+            glossary_line = (
+                "Some entries contain glossary replacements already written in the target "
+                "language. Keep those glossary terms unchanged while making the surrounding "
+                "text natural.\n"
+                if glossary_used
+                else ""
+            )
             prompt = (
                 "Act as a game localization specialist.\n"
-                f"{context_line}"
-                "Each entry below is formatted as [ID: ...] followed by text.\n"
+                "Each entry below contains an ID, optional reference context, and text.\n"
+                "Translate only the text after TEXT TO TRANSLATE. Do not translate or return "
+                "the reference context.\n"
+                f"{glossary_line}"
                 f"Translate every entry to {target_label}. Keep proper nouns and character names that should not be translated. Keep the IDs and separators exactly as provided.\n\n"
                 "---BEGIN BLOCK---\n"
                 f"{batch_text}\n"
@@ -278,5 +375,6 @@ class TranslationWorker:
             pairs = re.findall(r"\[ID: (.*?)\]\n(.*?)\n---", response.text, re.DOTALL)
             return {xpath.strip(): text.strip() for xpath, text in pairs}
         except Exception as exc:
-            self._on_log(f"ERRO na API: {exc}")
+            self._batch_error_code = classify_error(exc)
+            self._on_log(self._s("api_error", exc=ERROR_MESSAGES[self._batch_error_code]))
             return None

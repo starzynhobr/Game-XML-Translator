@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from core.extrator import extrair_textos, get_xpath
+from core.extrator import ExtractedEntry, extrair_entradas, extrair_textos, get_xpath
 
 FIXTURE_XML = os.path.join(os.path.dirname(__file__), "fixtures", "sample.xml")
 
@@ -53,3 +53,97 @@ class TestExtrairTextos:
         sucesso, dados = extrair_textos(FIXTURE_XML, "item", "description")
         assert sucesso is True
         assert any("brave warrior" in v for v in dados.values())
+
+
+class TestExtrairEntradas:
+    def test_extracts_multiple_target_tags_as_independent_entries(self):
+        sucesso, entradas = extrair_entradas(
+            FIXTURE_XML,
+            "item",
+            ["dispName", "description"],
+            [],
+        )
+
+        assert sucesso is True
+        assert len(entradas) == 6
+        assert all(isinstance(entry, ExtractedEntry) for entry in entradas)
+        assert [entry.source_tag for entry in entradas[:2]] == ["dispName", "description"]
+
+    def test_context_is_collected_from_the_same_parent_occurrence(self):
+        sucesso, entradas = extrair_entradas(
+            FIXTURE_XML,
+            "item",
+            ["description"],
+            ["id", "dispName"],
+        )
+
+        assert sucesso is True
+        assert entradas[0].context == {"id": "001", "dispName": "Hero of Light"}
+        assert entradas[1].context == {"id": "002", "dispName": "Shadow Rogue"}
+        assert entradas[0].container_xpath == "/root/item[1]"
+        assert entradas[1].container_xpath == "/root/item[2]"
+
+    def test_empty_or_missing_context_does_not_block_target_extraction(self):
+        sucesso, entradas = extrair_entradas(
+            FIXTURE_XML,
+            "item",
+            ["description"],
+            ["missing", "dispName"],
+        )
+
+        assert sucesso is True
+        assert len(entradas) == 3
+        assert "missing" not in entradas[0].context
+
+    def test_rejects_tag_selected_as_target_and_context(self):
+        sucesso, mensagem = extrair_entradas(
+            FIXTURE_XML,
+            "item",
+            ["description"],
+            ["description"],
+        )
+
+        assert sucesso is False
+        assert "alvo e contexto" in mensagem
+
+    def test_requires_at_least_one_target_tag(self):
+        sucesso, mensagem = extrair_entradas(FIXTURE_XML, "item", [], ["dispName"])
+
+        assert sucesso is False
+        assert "tag alvo" in mensagem.lower()
+
+    def test_deduplicates_requested_tags_without_changing_order(self):
+        sucesso, entradas = extrair_entradas(
+            FIXTURE_XML,
+            "item",
+            ["description", "description", "dispName"],
+            ["id", "id"],
+        )
+
+        assert sucesso is True
+        assert [entry.source_tag for entry in entradas[:2]] == ["description", "dispName"]
+        assert entradas[0].context == {"id": "001"}
+
+    def test_supports_namespaced_xml_using_local_tag_names(self, tmp_path):
+        namespaced_xml = tmp_path / "namespaced.xml"
+        namespaced_xml.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<data xmlns="urn:game">
+  <item><id>1</id><name>Hero</name><bio>Brave fighter.</bio></item>
+  <item><id>2</id><name>Mage</name><bio>Wise caster.</bio></item>
+</data>
+""",
+            encoding="utf-8",
+        )
+
+        sucesso, entradas = extrair_entradas(
+            str(namespaced_xml),
+            "item",
+            ["bio"],
+            ["name"],
+        )
+
+        assert sucesso is True
+        assert [entry.original for entry in entradas] == ["Brave fighter.", "Wise caster."]
+        assert entradas[0].context == {"name": "Hero"}
+        assert "local-name()='bio'" in entradas[0].xpath

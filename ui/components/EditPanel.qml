@@ -5,12 +5,31 @@ import QtQuick.Controls.FluentWinUI3
 
 Pane {
     id: root
+    property bool streamlined: false
+    property bool providerOptionsExpanded: !streamlined
+
+    function openGlossary() {
+        glossaryDialog.open()
+    }
 
     required property string xpath
     required property string originalText
     required property string translationText
+    required property string sourceTag
+    required property var entryContext
+    readonly property var review: { var revision = vm.reviewRevision; return vm.entryReview(root.xpath) }
 
     signal translationEdited(string text)
+    signal previousRequested()
+    signal nextRequested()
+
+    function focusTranslation() {
+        var position = translationArea.mapToItem(editPanelColumn, 0, 0)
+        editFlick.contentY = Math.max(0, Math.min(
+            editFlick.contentHeight - editFlick.height, position.y - 24))
+        translationArea.forceActiveFocus()
+        translationArea.selectAll()
+    }
 
     onTranslationTextChanged: {
         if (translationArea.text !== translationText)
@@ -28,6 +47,7 @@ Pane {
 
         Flickable {
             id: editFlick
+            objectName: "editorFlick"
             anchors { fill: parent; rightMargin: 14 }
             contentWidth: width
             contentHeight: editPanelColumn.implicitHeight
@@ -39,6 +59,25 @@ Pane {
             width: editFlick.width
             spacing: 8
 
+        Label {
+            objectName: "entryReviewStatus"
+            Layout.fillWidth: true
+            visible: root.xpath !== ""
+            text: vm.strings["state_" + (root.review.status || "pending")] ?? ""
+            color: Theme.textPrimary
+            font.bold: true
+            wrapMode: Text.Wrap
+        }
+        Label {
+            objectName: "entryReviewError"
+            Layout.fillWidth: true
+            visible: root.review.status === "error"
+            text: vm.strings["entry_error_" + (root.review.error_code || "unknown")] ?? ""
+            textFormat: Text.PlainText
+            color: Theme.textPrimary
+            wrapMode: Text.Wrap
+        }
+
         // ---- Title row with info button ----
         Item {
             Layout.fillWidth: true
@@ -46,36 +85,75 @@ Pane {
             Layout.bottomMargin: 4
 
             Label {
-                anchors.centerIn: parent
-                text: vm.strings["tools_panel_title"] ?? "Ferramentas"
-                font.pixelSize: 18
+                anchors {
+                    left: parent.left
+                    right: navActions.left
+                    rightMargin: 8
+                    verticalCenter: parent.verticalCenter
+                }
+                text: root.streamlined
+                    ? (vm.strings["edit_translation_title"] ?? "Edit translation")
+                    : (vm.strings["tools_panel_title"] ?? "Tools")
+                font.pixelSize: 15
                 font.weight: Font.DemiBold
                 color: Theme.textPrimary
+                elide: Text.ElideRight
             }
 
-            Rectangle {
-                id: infoBtn
+            Row {
+                id: navActions
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                width: 24; height: 24; radius: 12
-                color: infoBtnMouse.containsMouse ? Theme.bgSurface3 : "transparent"
-                border.color: Theme.borderModerate
-                border.width: 1
+                spacing: 5
 
-                Text {
-                    anchors.centerIn: parent
-                    text: "i"
-                    color: infoBtnMouse.containsMouse ? Theme.primary : Theme.textSecondary
-                    font.pixelSize: 13
-                    font.italic: true
-                    font.weight: Font.Bold
+                ModernToolbarButton {
+                    objectName: "previousEntryButton"
+                    width: 28
+                    height: 28
+                    text: "‹"
+                    enabled: root.xpath !== ""
+                    Accessible.name: vm.strings["previous_entry"] ?? "Previous entry"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 400
+                    ToolTip.text: Accessible.name
+                    onClicked: root.previousRequested()
                 }
 
-                MouseArea {
-                    id: infoBtnMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: infoDialog.open()
+                ModernToolbarButton {
+                    objectName: "nextEntryButton"
+                    width: 28
+                    height: 28
+                    text: "›"
+                    enabled: root.xpath !== ""
+                    Accessible.name: vm.strings["next_entry"] ?? "Next entry"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 400
+                    ToolTip.text: Accessible.name
+                    onClicked: root.nextRequested()
+                }
+
+                Rectangle {
+                    id: infoBtn
+                    width: 24; height: 24; radius: 12
+                    color: infoBtnMouse.containsMouse ? Theme.bgSurface3 : "transparent"
+                    border.color: Theme.borderModerate
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "i"
+                        color: infoBtnMouse.containsMouse ? Theme.primary : Theme.textSecondary
+                        font.pixelSize: 13
+                        font.italic: true
+                        font.weight: Font.Bold
+                    }
+
+                    MouseArea {
+                        id: infoBtnMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: infoDialog.open()
+                    }
                 }
             }
         }
@@ -204,6 +282,24 @@ Pane {
             }
         }
 
+        ModernToolbarButton {
+            objectName: "providerOptionsToggle"
+            visible: root.streamlined
+            Layout.fillWidth: true
+            text: vm.selectedProvider + " · "
+                + (vm.strings["topbar_settings"] ?? "Settings")
+                + (root.providerOptionsExpanded ? "  ⌄" : "  ›")
+            checkable: true
+            checked: root.providerOptionsExpanded
+            onClicked: root.providerOptionsExpanded = !root.providerOptionsExpanded
+        }
+
+        ColumnLayout {
+            objectName: "providerOptions"
+            visible: root.providerOptionsExpanded
+            Layout.fillWidth: true
+            spacing: 8
+
         // ---- Provider selector ----
         Label {
             text: vm.strings["provider_label"] ?? "AI Provider:"
@@ -215,7 +311,7 @@ Pane {
             model: vm.providers
             currentIndex: vm.providers.indexOf(vm.selectedProvider)
             Layout.fillWidth: true
-            enabled: !vm.isTranslating
+            enabled: !vm.isTranslating && !vm.isXmlBusy
             onActivated: vm.selectProvider(currentText)
         }
 
@@ -239,7 +335,7 @@ Pane {
         StyledComboBox {
             id: modelCombo
             visible: vm.selectedProvider === "Gemini"
-            enabled: !vm.isTranslating
+            enabled: !vm.isTranslating && !vm.isXmlBusy
             model: vm.modelLabels
             currentIndex: vm.selectedModelIndex
             Layout.fillWidth: true
@@ -264,7 +360,7 @@ Pane {
         TextField {
             id: ollamaModelField
             visible: vm.selectedProvider === "Ollama (Local)"
-            enabled: !vm.isTranslating
+            enabled: !vm.isTranslating && !vm.isXmlBusy
             text: vm.ollamaModel
             placeholderText: "llama3"
             Layout.fillWidth: true
@@ -283,7 +379,7 @@ Pane {
         // ---- API Key (hidden for Ollama) ----
         AppButton {
             visible: vm.providerNeedsApiKey
-            enabled: !vm.isTranslating
+            enabled: !vm.isTranslating && !vm.isXmlBusy
             text: vm.strings["api_key_config"] ?? "API Key"
             Layout.fillWidth: true
             onClicked: vm.configureApiKey()
@@ -411,6 +507,7 @@ Pane {
         // ---- Batch translate ----
         AppButton {
             id: translateBtn
+            visible: !root.streamlined
             text: vm.isTranslating
                   ? (vm.strings["cancel_button"] ?? "Cancel")
                   : vm.providerUsesAi
@@ -505,6 +602,7 @@ Pane {
         // ---- Glossary button ----
         AppButton {
             text: vm.strings["manage_glossary_button"] ?? "📖 Gerenciar Glossário"
+            visible: !root.streamlined
             Layout.fillWidth: true
             onClicked: glossaryDialog.open()
             background: Rectangle {
@@ -539,7 +637,7 @@ Pane {
             text: vm.translationContext
             placeholderText: vm.strings["translation_context_placeholder"] ?? "Ex: Marvel, Skyrim, The Sims 4..."
             Layout.fillWidth: true
-            enabled: !vm.isTranslating
+            enabled: !vm.isTranslating && !vm.isXmlBusy
             onEditingFinished: vm.setTranslationContext(text)
             color: Theme.textInput
             placeholderTextColor: Theme.textPlaceholder
@@ -548,6 +646,108 @@ Pane {
                 radius: 4
                 border.color: parent.activeFocus ? Theme.borderFocus : Theme.borderInput
                 border.width: parent.activeFocus ? 2 : 1
+            }
+        }
+
+        } // Provider options
+
+        // ---- Original text (read-only) ----
+        Rectangle {
+            visible: root.xpath !== ""
+            Layout.fillWidth: true
+            implicitHeight: entryMetadataColumn.implicitHeight + 16
+            radius: 4
+            color: Theme.bgSurface2
+            border.color: Theme.borderSubtle
+            border.width: 1
+
+            ColumnLayout {
+                id: entryMetadataColumn
+                anchors {
+                    left: parent.left; right: parent.right; top: parent.top
+                    margins: 8
+                }
+                spacing: 6
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Label {
+                        text: vm.strings["source_tag_label"] ?? "Source tag"
+                        color: Theme.textSecondary
+                        font.pixelSize: 11
+                    }
+
+                    Rectangle {
+                        implicitWidth: selectedSourceTagLabel.implicitWidth + 12
+                        implicitHeight: 22
+                        radius: 4
+                        color: Theme.bgSurface3
+                        border.color: Theme.primary
+                        border.width: 1
+
+                        Label {
+                            id: selectedSourceTagLabel
+                            anchors.centerIn: parent
+                            text: root.sourceTag || "—"
+                            color: Theme.primary
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: Theme.borderSubtle
+                }
+
+                Label {
+                    text: vm.strings["entry_context_label"] ?? "Entry context"
+                    color: Theme.textSecondary
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                }
+
+                Label {
+                    visible: Object.keys(root.entryContext).length === 0
+                    Layout.fillWidth: true
+                    text: vm.strings["entry_context_empty"] ?? "No context selected for this entry."
+                    color: Theme.textDisabled
+                    font.pixelSize: 11
+                    font.italic: true
+                    wrapMode: Text.WordWrap
+                }
+
+                Repeater {
+                    model: Object.keys(root.entryContext)
+
+                    delegate: ColumnLayout {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Label {
+                            text: modelData
+                            color: Theme.warning
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.entryContext[modelData] ?? ""
+                            color: Theme.textPrimary
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            textFormat: Text.PlainText
+                        }
+                    }
+                }
             }
         }
 
@@ -598,7 +798,8 @@ Pane {
             }
 
             TextArea {
-                id: translationArea
+            id: translationArea
+            objectName: "translationEditor"
                 text: root.translationText
                 wrapMode: TextArea.Wrap
                 color: Theme.textInput
@@ -614,11 +815,16 @@ Pane {
             id: suggestBtn
             text: vm.isSingleTranslating
                   ? (vm.strings["translating_button"] ?? "Translating…")
+                  : vm.selectedCount > 1
+                    ? (vm.strings["translate_selected_count_button"] ?? "Translate {count} Selected")
+                        .replace("{count}", vm.selectedCount)
+                  : root.review.status === "error"
+                    ? vm.strings["retry_translation"]
                   : vm.providerUsesAi
                     ? (vm.strings["generate_suggestion_button"]     ?? "Translate Selected (AI)")
                     : (vm.strings["generate_suggestion_api_button"] ?? "Translate Selected")
             Layout.fillWidth: true
-            enabled: root.xpath !== "" && !vm.isSingleTranslating
+            enabled: root.xpath !== "" && !vm.isSingleTranslating && !vm.isTranslating && !vm.isXmlBusy
             onClicked: vm.translateSelected()
 
             background: Rectangle {
@@ -674,7 +880,7 @@ Pane {
             text: vm.strings["approve_button"] ?? "✅ Confirmar Tradução Selecionada"
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            enabled: root.xpath !== "" && !vm.isTranslating
+            enabled: root.xpath !== "" && !vm.isTranslating && !vm.isXmlBusy
             HoverHandler { cursorShape: approveBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
             background: Rectangle {
                 color: approveBtn.enabled
@@ -696,13 +902,46 @@ Pane {
             onClicked: vm.approveTranslation(root.xpath, translationArea.text)
         }
 
+        // ---- Apply the current translation to exact duplicate originals ----
+        AppButton {
+            id: applyDuplicatesBtn
+            property int matchCount: root.xpath === "" ? 0 : vm.countDuplicates(root.xpath)
+            text: (vm.strings["apply_duplicates_button"] ?? "Apply to {count} identical entries")
+                  .replace("{count}", matchCount)
+            visible: matchCount > 1
+            Layout.fillWidth: true
+            Layout.preferredHeight: 34
+            enabled: translationArea.text.trim() !== "" && !vm.isTranslating && !vm.isXmlBusy
+            HoverHandler { cursorShape: applyDuplicatesBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
+            ToolTip.visible: hovered
+            ToolTip.delay: 400
+            ToolTip.text: vm.strings["apply_duplicates_tooltip"]
+                              ?? "Matches the complete original text and changes pending entries only."
+            background: Rectangle {
+                color: applyDuplicatesBtn.enabled
+                    ? (applyDuplicatesBtn.hovered ? Theme.bgSurface3 : Theme.bgSurface2)
+                    : Theme.bgBase
+                radius: 4
+                border.color: applyDuplicatesBtn.enabled ? Theme.primary : Theme.borderSubtle
+                border.width: 1
+            }
+            contentItem: Label {
+                text: applyDuplicatesBtn.text
+                color: applyDuplicatesBtn.enabled ? Theme.textPrimary : Theme.textDisabled
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: 12
+            }
+            onClicked: vm.applyTranslationToDuplicates(root.xpath, translationArea.text)
+        }
+
         // ---- Approve all ----
         AppButton {
             id: approveAllBtn
             text: vm.strings["approve_all_button"] ?? "✅ Confirmar Todas as Traduções"
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            enabled: vm.hasXmlPath && !vm.isTranslating
+            enabled: vm.hasXmlPath && !vm.isTranslating && !vm.isXmlBusy
             HoverHandler { cursorShape: approveAllBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
             background: Rectangle {
                 color: approveAllBtn.enabled
@@ -739,5 +978,8 @@ Pane {
         }
     }  // Item
 
-    GlossaryDialog { id: glossaryDialog }
+    GlossaryDialog {
+        id: glossaryDialog
+        objectName: "glossaryDialog"
+    }
 }

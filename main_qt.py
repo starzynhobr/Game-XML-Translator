@@ -23,11 +23,13 @@ Run: python main_qt.py
 # nuitka-project: --output-filename=STZXMLTranslator.exe
 # nuitka-project: --output-dir=dist
 # nuitka-project: --windows-icon-from-ico=assets/icon.ico
-# nuitka-project: --company-name=STZ XML Translator
+# nuitka-project: --company-name=STZ Labs
 # nuitka-project: --product-name=STZ XML Translator
 # nuitka-project: --file-description=STZ XML Translator -- XML localization tool for game modders
 import os
 import sys
+
+from core.version import app_version
 
 # Force FluentWinUI3 dark theme before importing Qt
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3")
@@ -65,6 +67,31 @@ def _resolve(relative: str) -> str:
     else:
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative)
+
+
+def _ui_candidates(preferred_ui_mode: str, ui_dir: str) -> list[tuple[str, str]]:
+    """Return QML shells in load order, including the safe classic fallback."""
+    classic = os.path.join(ui_dir, "main.qml")
+    if preferred_ui_mode == "modern":
+        return [("modern", os.path.join(ui_dir, "ModernMain.qml")), ("classic", classic)]
+    return [("classic", classic)]
+
+
+def _load_ui_with_fallback(engine, preferred_ui_mode: str, ui_dir: str) -> str | None:
+    """Load the selected shell and fall back to classic when modern cannot start."""
+    candidates = _ui_candidates(preferred_ui_mode, ui_dir)
+    for index, (ui_mode, qml_file) in enumerate(candidates):
+        print(f"Loading QML ({ui_mode}): {qml_file}", file=sys.stderr)
+        engine.load(qml_file)
+        if engine.rootObjects():
+            return ui_mode
+        if index + 1 < len(candidates):
+            print(
+                "WARNING: Modern UI failed to load; falling back to the classic UI.",
+                file=sys.stderr,
+            )
+            engine.clearComponentCache()
+    return None
 
 
 def _apply_dark_palette(app) -> None:
@@ -116,13 +143,14 @@ def _apply_dark_palette(app) -> None:
 
 
 def main() -> int:
+    from PySide6.QtCore import QTimer
     from PySide6.QtGui import QIcon
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
     app.setApplicationName("STZ XML Translator")
-    app.setApplicationVersion("1.2.0")
+    app.setApplicationVersion(app_version())
     app.setOrganizationName("GameXMLTranslator")
 
     # Dark palette is applied after loading the initial theme below.
@@ -186,13 +214,13 @@ def main() -> int:
     ui_dir = _resolve("ui")
     engine.addImportPath(ui_dir)
 
-    qml_file = _resolve(os.path.join("ui", "main.qml"))
-    print(f"Loading QML: {qml_file}", file=sys.stderr)
-    engine.load(qml_file)
-
-    if not engine.rootObjects():
-        print("ERROR: Failed to load main.qml — check QML warnings above", file=sys.stderr)
+    loaded_ui_mode = _load_ui_with_fallback(engine, vm._ctrl.preferred_ui_mode, ui_dir)
+    if loaded_ui_mode is None:
+        print("ERROR: Failed to load a UI shell — check QML warnings above", file=sys.stderr)
         return 1
+
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        QTimer.singleShot(1500, vm.checkForUpdatesAutomatically)
 
     result = app.exec()
 
