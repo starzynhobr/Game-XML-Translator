@@ -96,7 +96,9 @@ def fetch_latest_release(
         raise UpdateError("installer_missing")
 
     download_url = str(asset.get("browser_download_url", ""))
-    if not download_url.startswith(RELEASE_DOWNLOAD_PREFIX):
+    # GitHub canonicalizes repository owners in asset URLs and may change only
+    # their letter casing. URL paths are otherwise kept exact.
+    if not download_url.casefold().startswith(RELEASE_DOWNLOAD_PREFIX.casefold()):
         raise UpdateError("invalid_release")
     digest_match = _SHA256_RE.fullmatch(str(asset.get("digest", "")))
     if not digest_match:

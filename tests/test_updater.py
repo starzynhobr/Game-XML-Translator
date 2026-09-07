@@ -81,7 +81,11 @@ def test_parse_version_rejects_non_semantic_versions():
 
 
 def test_latest_release_selects_exact_installer_and_digest():
-    http = FakeHttp(FakeResponse(payload=release_payload()))
+    payload = release_payload()
+    payload["assets"][0]["browser_download_url"] = payload["assets"][0][
+        "browser_download_url"
+    ].replace("StarzynhoBR", "starzynhobr")
+    http = FakeHttp(FakeResponse(payload=payload))
 
     release = fetch_latest_release("1.4.0", http=http)
 
@@ -90,6 +94,16 @@ def test_latest_release_selects_exact_installer_and_digest():
     assert release.installer_name == "STZXMLTranslator-Setup-1.5.0.exe"
     assert len(release.sha256) == 64
     assert http.calls[0][1]["timeout"] == 12
+
+
+def test_latest_release_rejects_asset_from_another_repository():
+    payload = release_payload()
+    payload["assets"][0]["browser_download_url"] = payload["assets"][0][
+        "browser_download_url"
+    ].replace("STZ-XML-Translator", "another-repository")
+
+    with pytest.raises(UpdateError, match="invalid_release"):
+        fetch_latest_release("1.4.0", http=FakeHttp(FakeResponse(payload=payload)))
 
 
 def test_latest_release_returns_none_when_current_is_newer():
